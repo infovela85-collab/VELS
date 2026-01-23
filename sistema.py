@@ -213,4 +213,5 @@ elif seleccion == "📊 Libros de IVA":
 
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
+
     st.write("Configuraciones del sistema.")
