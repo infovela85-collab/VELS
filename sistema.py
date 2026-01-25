@@ -195,12 +195,21 @@ elif seleccion == "📊 Libros de IVA":
             
             if registros:
                 df = pd.DataFrame(registros)
+                
+                # Función para generar la fórmula de suma estilo Excel
+                def crear_formula_suma(series):
+                    return "=" + "+".join(series.astype(str))
+
                 resumen = df.groupby("Fecha").agg({
                     "UUID": ["first", "last", "count"],
-                    "Exentas": "sum", "Gravadas": "sum", "Total": "sum"
+                    "Exentas": crear_formula_suma, 
+                    "Gravadas": crear_formula_suma, 
+                    "Total": crear_formula_suma
                 }).reset_index()
+                
                 resumen.columns = ["Fecha", "Desde", "Hasta", "Cant", "Exentas", "Gravadas", "Total"]
                 st.dataframe(resumen)
+                
                 if fallidos > 0:
                     st.warning(f"Se omitieron {fallidos} archivo(s) por errores de formato.")
                 
@@ -213,5 +222,4 @@ elif seleccion == "📊 Libros de IVA":
 
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
-
     st.write("Configuraciones del sistema.")
