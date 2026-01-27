@@ -7,23 +7,22 @@ import zipfile
 import re
 import json
 import pandas as pd
+import imaplib
+import email
+from email.header import decode_header
+from datetime import datetime
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="VELS SmartSeal Pro", page_icon="🛡️", layout="wide")
 
-# --- 2. CSS PARA EL DISEÑO QUE TE GUSTÓ ---
+# --- 2. CSS PARA EL DISEÑO (INTACTO) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
-
-    /* Fuente Global */
     * { font-family: 'Plus Jakarta Sans', sans-serif; }
     .stApp { background-color: #f8fafc; }
-
-    /* PANEL IZQUIERDO (SIDEBAR) - ESTILO QUE TE GUSTÓ */
     [data-testid="stSidebar"] { background-color: #1e293b !important; }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
-    
     .sidebar-title {
         background: linear-gradient(90deg, #60a5fa, #93c5fd);
         -webkit-background-clip: text;
@@ -34,16 +33,12 @@ st.markdown("""
         margin-bottom: 0px;
         letter-spacing: -1px;
     }
-
-    /* TÍTULOS DE MÓDULOS */
     .main-title { 
         color: #1e293b; 
         font-size: 2.5rem; 
         font-weight: 800; 
         text-align: center; 
     }
-
-    /* BOTONES */
     .stButton>button {
         background-color: #1e293b !important;
         color: white !important;
@@ -55,7 +50,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. FUNCIONES CORE (SIN TOCAR) ---
+# --- 3. FUNCIONES CORE (INTACTO) ---
 def obtener_datos_dte(archivo):
     patron_uuid = r'[A-Z0-9]{8}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{12}'
     catalogo = {
@@ -90,12 +85,12 @@ def obtener_datos_dte(archivo):
     except: return "ERROR", "OTROS"
     return str(uuid).upper(), tipo_nombre
 
-# --- 4. BARRA LATERAL (TU DISEÑO FAVORITO) ---
+# --- 4. BARRA LATERAL (INTACTO) ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">🛡️ VELS <br>SmartSeal</p>', unsafe_allow_html=True)
     st.write("---")
-    seleccion = st.radio("MÓDULOS", ["🚀 Añadir Logo", "📂 Archivador DTE", "📊 Libros de IVA", "⚙️ Ajustes"])
-    st.write("--------")
+    seleccion = st.radio("MÓDULOS", ["🚀 Añadir Logo", "📂 Archivador DTE", "📊 Libros de IVA", "📬 Auto-Descarga JSON", "⚙️ Ajustes"])
+    st.write("---")
     st.caption("Perfil: Vels")
 
 # --- 5. LÓGICA DE MÓDULOS ---
@@ -173,7 +168,6 @@ elif seleccion == "📊 Libros de IVA":
     if st.button("GENERAR LIBRO VENTAS CONSUMIDOR"):
         if arc_cons:
             registros = []
-            fallidos = 0
             for f in arc_cons:
                 if f is None: continue 
                 try:
@@ -189,37 +183,96 @@ elif seleccion == "📊 Libros de IVA":
                             "Gravadas": float(res.get("totalGravada", 0.0)),
                             "Total": float(res.get("totalPagar", 0.0))
                         })
-                except Exception:
-                    fallidos += 1
-                    continue
+                except: continue
             
             if registros:
                 df = pd.DataFrame(registros)
                 
-                # Función para generar la fórmula de suma estilo Excel
-                def crear_formula_suma(series):
-                    return "=" + "+".join(series.astype(str))
+                # --- FÓRMULA SOLO PARA GRAVADAS ---
+                def crear_formula_excel(serie):
+                    return "=" + "+".join(serie.astype(str))
 
                 resumen = df.groupby("Fecha").agg({
                     "UUID": ["first", "last", "count"],
-                    "Exentas": crear_formula_suma, 
-                    "Gravadas": crear_formula_suma, 
-                    "Total": crear_formula_suma
+                    "Exentas": "sum",
+                    "Gravadas": crear_formula_excel,
+                    "Total": "sum"
                 }).reset_index()
                 
                 resumen.columns = ["Fecha", "Desde", "Hasta", "Cant", "Exentas", "Gravadas", "Total"]
                 st.dataframe(resumen)
                 
-                if fallidos > 0:
-                    st.warning(f"Se omitieron {fallidos} archivo(s) por errores de formato.")
-                
                 out = io.BytesIO()
                 with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
                     resumen.to_excel(writer, index=False, sheet_name='Ventas_CF')
                 st.download_button("📥 DESCARGAR EXCEL", out.getvalue(), "Libro_Consumidor.xlsx")
-        else:
-            st.warning("No hay archivos cargados en la sección de Consumidor.")
+
+elif seleccion == "📬 Auto-Descarga JSON":
+    st.markdown('<h1 class="main-title">Descarga Inteligente DTE</h1>', unsafe_allow_html=True)
+    
+    # INICIALIZACIÓN VACÍA PARA GITHUB
+    if "email_pref" not in st.session_state: st.session_state.email_pref = ""
+    if "pass_pref" not in st.session_state: st.session_state.pass_pref = ""
+
+    with st.form("vels_form_mail", clear_on_submit=False):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            email_user = st.text_input("Tu Correo", value=st.session_state.email_pref, key="vels_u") 
+            email_pass = st.text_input("Contraseña de Aplicación", value=st.session_state.pass_pref, type="password", key="vels_p")
+            recordar = st.checkbox("Recordar en esta sesión", value=True)
+            server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"], index=0)
+        with col_b:
+            email_sender = st.text_input("Correo del Remitente", value="facturas@empresa.com", key="vels_s")
+            meses_lista = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+            col_m, col_y = st.columns(2)
+            with col_m: mes_sel = st.selectbox("Mes", meses_lista, index=datetime.now().month - 1)
+            with col_y: anio_sel = st.number_input("Año", min_value=2024, max_value=2030, value=datetime.now().year)
+
+        submit_button = st.form_submit_button("PROCESAR Y RENOMBRAR POR UUID")
+
+    if submit_button:
+        if recordar:
+            st.session_state.email_pref = email_user
+            st.session_state.pass_pref = email_pass
+        try:
+            mes_imap = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][meses_lista.index(mes_sel)]
+            date_filter = f"SINCE 01-{mes_imap}-{anio_sel}"
+            mail = imaplib.IMAP4_SSL(server_choice)
+            mail.login(email_user, email_pass)
+            mail.select("inbox")
+            status, search_data = mail.search(None, f'(FROM "{email_sender}" {date_filter})')
+            mail_ids = search_data[0].split()
+            if mail_ids:
+                zip_buffer = io.BytesIO()
+                encontrados = 0
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for m_id in mail_ids:
+                        res, data = mail.fetch(m_id, "(RFC822)")
+                        msg = email.message_from_bytes(data[0][1])
+                        uuid_correo, json_data, pdf_data = None, None, None
+                        for part in msg.walk():
+                            if part.get_content_maintype() == 'multipart': continue
+                            fname = part.get_filename()
+                            if fname and fname.lower().endswith(".json"):
+                                try:
+                                    raw_json = json.loads(part.get_payload(decode=True))
+                                    uuid_correo = raw_json.get("identificacion", {}).get("codigoGeneracion")
+                                    json_data = part.get_payload(decode=True)
+                                except: pass
+                        if uuid_correo:
+                            for part in msg.walk():
+                                if part.get_filename() and part.get_filename().lower().endswith(".pdf"):
+                                    pdf_data = part.get_payload(decode=True)
+                                    break
+                            if json_data and pdf_data:
+                                zf.writestr(f"{uuid_correo.upper()}.json", json_data)
+                                zf.writestr(f"{uuid_correo.upper()}.pdf", pdf_data)
+                                encontrados += 1
+                if encontrados > 0:
+                    st.success(f"✅ {encontrados} DTE procesados.")
+                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{mes_sel}.zip")
+            mail.logout()
+        except Exception as e: st.error(f"Error: {e}")
 
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
-    st.write("Configuraciones del sistema.")
