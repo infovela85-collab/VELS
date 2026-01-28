@@ -15,8 +15,7 @@ def conectar_y_descargar(correo_user, clave_user, carpeta_destino):
         imap.login(correo_user, clave_user)
         imap.select("INBOX")
 
-        # EL CAMBIO CLAVE: Se usa 'ALL' para que el sistema revise cada correo 
-        # en tu bandeja, permitiendo encontrar archivos en correos reenviados.
+        # CAMBIO SOLICITADO: Se usa 'ALL' para incluir correos reenviados de cualquier remitente
         status, mensajes = imap.search(None, 'ALL')
         
         if status != "OK":
@@ -29,7 +28,6 @@ def conectar_y_descargar(correo_user, clave_user, carpeta_destino):
         progreso = st.progress(0)
         status_text = st.empty()
 
-        # Procesamos desde el más reciente al más antiguo
         for i, num in enumerate(reversed(id_lista)):
             status_text.text(f"Analizando correo {i+1} de {len(id_lista)}...")
             res, msg_data = imap.fetch(num, "(RFC822)")
@@ -38,7 +36,6 @@ def conectar_y_descargar(correo_user, clave_user, carpeta_destino):
                 if isinstance(response_part, tuple):
                     msg = email.message_from_bytes(response_part[1])
                     
-                    # Caminar por las partes del correo para buscar adjuntos
                     for part in msg.walk():
                         if part.get_content_maintype() == 'multipart':
                             continue
@@ -47,26 +44,22 @@ def conectar_y_descargar(correo_user, clave_user, carpeta_destino):
 
                         filename = part.get_filename()
                         if filename:
-                            # Decodificar el nombre del archivo
                             decode = decode_header(filename)[0]
                             if isinstance(decode[0], bytes):
                                 filename = decode[0].decode(decode[1] or 'utf-8')
                             
-                            # Filtro: Solo descargar si es JSON o PDF
+                            # Filtro de archivos por extensión
                             if filename.lower().endswith(('.json', '.pdf')):
                                 filepath = os.path.join(carpeta_destino, filename)
                                 
-                                # Solo descargar si el archivo no existe localmente
                                 if not os.path.exists(filepath):
                                     with open(filepath, "wb") as f:
                                         f.write(part.get_payload(decode=True))
                                     descargados += 1
             
             progreso.progress((i + 1) / len(id_lista))
-            
-            # Límite de seguridad para no saturar la memoria en la primera ejecución
-            if i > 150: 
-                break 
+            # Límite opcional para no procesar miles de correos antiguos de una vez
+            if i > 100: break 
 
         imap.close()
         imap.logout()
@@ -79,21 +72,18 @@ def conectar_y_descargar(correo_user, clave_user, carpeta_destino):
 # --- INTERFAZ DE USUARIO ---
 st.title("🛡️ VELS SmartSeal Pro")
 
-# Inputs de usuario
 user_email = st.text_input("Correo Electrónico")
 user_password = st.text_input("Contraseña de Aplicación", type="password")
 target_folder = st.text_input("Carpeta de Destino Local", value="C:/DTE_Descargas")
 
-# Botón de ejecución
 if st.button("🚀 Iniciar Descarga"):
     if user_email and user_password:
-        # Crear la carpeta si no existe
         if not os.path.exists(target_folder):
             os.makedirs(target_folder)
         
         total = conectar_y_descargar(user_email, user_password, target_folder)
         
         if total is not None:
-            st.success(f"Proceso finalizado. Se descargaron {total} archivos nuevos en {target_folder}.")
+            st.success(f"Proceso finalizado. Se descargaron {total} archivos nuevos.")
     else:
-        st.warning("Por favor, ingresa tus credenciales para continuar.")
+        st.warning("Por favor, ingresa tus credenciales.")
