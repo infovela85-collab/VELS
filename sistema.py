@@ -10,7 +10,7 @@ import pandas as pd
 import imaplib
 import email
 from email.header import decode_header
-from datetime import datetime
+from datetime import datetime, date
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="VELS SmartSeal Pro", page_icon="🛡️", layout="wide")
@@ -21,7 +21,7 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
     * { font-family: 'Plus Jakarta Sans', sans-serif; }
     .main-title { font-size: 2.5rem; font-weight: 800; text-align: center; color: inherit; }
-    .stTextInput label, .stSelectbox label, .stNumberInput label, .stCheckbox p { color: inherit !important; }
+    .stTextInput label, .stSelectbox label, .stNumberInput label, .stCheckbox p, .stDateInput label { color: inherit !important; }
     [data-testid="stSidebar"] { background-color: #1e293b !important; }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
     .sidebar-title {
@@ -81,12 +81,7 @@ def obtener_datos_dte(archivo):
     return (str(uuid).upper(), tipo_nombre) if uuid else (None, None)
 
 def guardar_local(u, p):
-    js = f"""
-    <script>
-        localStorage.setItem('vels_u', '{u}');
-        localStorage.setItem('vels_p', '{p}');
-    </script>
-    """
+    js = f"<script>localStorage.setItem('vels_u', '{u}'); localStorage.setItem('vels_p', '{p}');</script>"
     st.components.v1.html(js, height=0)
 
 # --- 4. BARRA LATERAL ---
@@ -98,7 +93,6 @@ with st.sidebar:
     st.caption("Perfil: Vels")
 
 # --- 5. LÓGICA DE MÓDULOS ---
-# Inicializar variables de sesión para que no se pierdan entre clics
 if "email_pref" not in st.session_state: st.session_state.email_pref = ""
 if "pass_pref" not in st.session_state: st.session_state.pass_pref = ""
 
@@ -190,33 +184,32 @@ elif seleccion == "📬 Auto-Descarga JSON":
         col_a, col_b = st.columns(2)
         with col_a:
             email_user = st.text_input("Tu Correo", value=st.session_state.email_pref) 
-            # Aquí se carga la clave de la sesión si existe
             email_pass = st.text_input("Contraseña de Aplicación", value=st.session_state.pass_pref, type="password")
             recordar = st.checkbox("Recordar en este navegador", value=True)
             server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
         with col_b:
             email_sender = st.text_input("Correo del Remitente", value="facturas@empresa.com")
-            meses_lista = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-            col_m, col_y = st.columns(2)
-            with col_m: mes_sel = st.selectbox("Mes", meses_lista, index=datetime.now().month - 1)
-            with col_y: anio_sel = st.number_input("Año", min_value=2024, max_value=2030, value=datetime.now().year)
+            # MEJORA: Rango de Fechas
+            col_f1, col_f2 = st.columns(2)
+            with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1))
+            with col_f2: fecha_hasta = st.date_input("Hasta", value=date.today())
         submit_button = st.form_submit_button("PROCESAR DTE")
 
     if submit_button:
-        # Al presionar el botón, guardamos AMBOS en la sesión y en local
-        st.session_state.email_pref = email_user
-        st.session_state.pass_pref = email_pass
+        st.session_state.email_pref, st.session_state.pass_pref = email_user, email_pass
         if recordar: guardar_local(email_user, email_pass)
-        
         try:
-            mes_imap = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][meses_lista.index(mes_sel)]
+            # Formatear fecha para IMAP (01-Jan-2024)
+            imap_date = fecha_desde.strftime("%d-%b-%Y")
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
             mail.select("inbox")
-            status, search_data = mail.search(None, f'(FROM "{email_sender}" SINCE 01-{mes_imap}-{anio_sel})')
+            # Filtro por remitente y fecha
+            status, search_data = mail.search(None, f'(FROM "{email_sender}" SINCE {imap_date})')
             mail_ids = search_data[0].split()
             if mail_ids:
                 zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
+                uuids_procesados = set() # MEJORA: Control de duplicidad
                 with zipfile.ZipFile(zip_buffer, "w") as zf:
                     for idx, m_id in enumerate(mail_ids):
                         res, data = mail.fetch(m_id, "(RFC822)")
@@ -224,28 +217,33 @@ elif seleccion == "📬 Auto-Descarga JSON":
                         uuid_dte, json_data, pdf_data = None, None, None
                         for part in msg.walk():
                             if part.get_filename():
-                                fn = part.get_filename().lower()
-                                payload = part.get_payload(decode=True)
+                                fn, payload = part.get_filename().lower(), part.get_payload(decode=True)
                                 if fn.endswith(".json"):
                                     try:
                                         raw = json.loads(payload)
-                                        uuid_dte = raw.get("identificacion", {}).get("codigoGeneracion")
-                                        json_data = payload
+                                        u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
+                                        if u_tmp: uuid_dte, json_data = u_tmp, payload
                                     except: pass
                                 elif fn.endswith(".pdf"):
-                                    u, _ = obtener_datos_dte(io.BytesIO(payload))
-                                    if u: pdf_data, uuid_dte = payload, u
+                                    u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
+                                    if u_tmp: pdf_data, uuid_dte = payload, u_tmp
+                        
+                        # MEJORA: Guardar solo si es DTE y NO está duplicado
                         if uuid_dte and (json_data or pdf_data):
-                            if json_data: zf.writestr(f"{uuid_dte.upper()}.json", json_data)
-                            if pdf_data: zf.writestr(f"{uuid_dte.upper()}.pdf", pdf_data)
-                            encontrados += 1
+                            uuid_dte = uuid_dte.upper()
+                            if uuid_dte not in uuids_procesados:
+                                if json_data: zf.writestr(f"{uuid_dte}.json", json_data)
+                                if pdf_data: zf.writestr(f"{uuid_dte}.pdf", pdf_data)
+                                uuids_procesados.add(uuid_dte)
+                                encontrados += 1
                         progreso_mail.progress((idx + 1) / len(mail_ids))
                 if encontrados > 0:
-                    st.success(f"✅ {encontrados} DTE procesados.")
-                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{mes_sel}.zip")
+                    st.success(f"✅ {encontrados} DTE únicos procesados.")
+                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_Rango_{fecha_desde}_a_{fecha_hasta}.zip")
+                else: st.warning("No se encontraron DTE nuevos o válidos.")
             mail.logout()
         except Exception as e: st.error(f"Error: {e}")
 
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
-    st.info("Configuración de persistencia actualizada para recordar clave de aplicación.")
+    st.info("Control de duplicidad y rango de fechas activo.")
