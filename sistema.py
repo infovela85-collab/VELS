@@ -189,7 +189,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
             server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
         with col_b:
             email_sender = st.text_input("Correo del Remitente", value="facturas@empresa.com")
-            # FORMATO DE FECHA: Día/Mes/Año
             col_f1, col_f2 = st.columns(2)
             with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY")
             with col_f2: fecha_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY")
@@ -213,18 +212,33 @@ elif seleccion == "📬 Auto-Descarga JSON":
                         res, data = mail.fetch(m_id, "(RFC822)")
                         msg = email.message_from_bytes(data[0][1])
                         uuid_dte, json_data, pdf_data = None, None, None
+                        
+                        # --- MEJORA PUNTAL PARA REENVIADOS ---
                         for part in msg.walk():
-                            if part.get_filename():
-                                fn, payload = part.get_filename().lower(), part.get_payload(decode=True)
-                                if fn.endswith(".json"):
-                                    try:
-                                        raw = json.loads(payload)
-                                        u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
-                                        if u_tmp: uuid_dte, json_data = u_tmp, payload
-                                    except: pass
-                                elif fn.endswith(".pdf"):
+                            content_type = part.get_content_type()
+                            fn = part.get_filename()
+                            
+                            if not fn:
+                                if content_type == "application/json": fn = "data.json"
+                                elif content_type == "application/pdf": fn = "data.pdf"
+                                else: continue
+                            
+                            fn = fn.lower()
+                            payload = part.get_payload(decode=True)
+                            if not payload: continue
+
+                            if fn.endswith(".json"):
+                                try:
+                                    raw = json.loads(payload)
+                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
+                                    if u_tmp: uuid_dte, json_data = u_tmp, payload
+                                except: pass
+                            elif fn.endswith(".pdf"):
+                                try:
                                     u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
                                     if u_tmp: pdf_data, uuid_dte = payload, u_tmp
+                                except: pass
+                        # --- FIN MEJORA ---
                         
                         if uuid_dte and (json_data or pdf_data):
                             uuid_dte = uuid_dte.upper()
