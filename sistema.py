@@ -15,14 +15,28 @@ from datetime import datetime
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="VELS SmartSeal Pro", page_icon="🛡️", layout="wide")
 
-# --- 2. CSS PARA EL DISEÑO (INTACTO) ---
+# --- 2. CSS PARA EL DISEÑO (ADAPTADO PARA MODO OSCURO SIN CAMBIOS DE ESTRUCTURA) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
     * { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .stApp { background-color: #f8fafc; }
+    
+    /* Título principal adaptativo para que se vea en oscuro y claro */
+    .main-title { 
+        font-size: 2.5rem; 
+        font-weight: 800; 
+        text-align: center; 
+        color: inherit; 
+    }
+    
+    /* Forzar visibilidad de textos en inputs para modo oscuro */
+    .stTextInput label, .stSelectbox label, .stNumberInput label, .stCheckbox p {
+        color: inherit !important;
+    }
+
     [data-testid="stSidebar"] { background-color: #1e293b !important; }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
+    
     .sidebar-title {
         background: linear-gradient(90deg, #60a5fa, #93c5fd);
         -webkit-background-clip: text;
@@ -33,12 +47,7 @@ st.markdown("""
         margin-bottom: 0px;
         letter-spacing: -1px;
     }
-    .main-title { 
-        color: #1e293b; 
-        font-size: 2.5rem; 
-        font-weight: 800; 
-        text-align: center; 
-    }
+    
     .stButton>button {
         background-color: #1e293b !important;
         color: white !important;
@@ -50,7 +59,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. FUNCIONES CORE (INTACTO) ---
+# --- 3. FUNCIONES CORE ---
 def obtener_datos_dte(archivo):
     patron_uuid = r'[A-Z0-9]{8}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{12}'
     catalogo = {
@@ -63,29 +72,41 @@ def obtener_datos_dte(archivo):
     tipo_nombre = "OTROS_DOCUMENTOS"
     try:
         if archivo is None: return "ERROR", "OTROS"
-        nombre_original = archivo.name.upper()
+        nombre_original = getattr(archivo, 'name', "").upper()
         archivo.seek(0)
+        
         if nombre_original.endswith(".JSON"):
             data = json.load(archivo)
             uuid = data.get("identificacion", {}).get("codigoGeneracion")
             codigo_tipo = data.get("identificacion", {}).get("tipoDte")
             tipo_nombre = catalogo.get(codigo_tipo, "OTROS_DOCUMENTOS")
-        elif nombre_original.endswith(".PDF"):
+        else:
             reader = PdfReader(archivo)
             texto = "".join([p.extract_text() or "" for p in reader.pages])
             match_uuid = re.search(patron_uuid, texto.upper())
-            if match_uuid: uuid = match_uuid.group(0)
-            for codigo, nombre in catalogo.items():
-                if nombre in texto.upper() or f"TIPO DE DOCUMENTO: {codigo}" in texto.upper():
-                    tipo_nombre = nombre
-                    break
-        if not uuid:
+            if match_uuid: 
+                uuid = match_uuid.group(0)
+                for codigo, nombre in catalogo.items():
+                    if nombre in texto.upper() or f"TIPO DE DOCUMENTO: {codigo}" in texto.upper():
+                        tipo_nombre = nombre
+                        break
+        
+        if not uuid and nombre_original:
             match_nom = re.search(patron_uuid, nombre_original)
-            uuid = match_nom.group(0) if match_nom else nombre_original.split('.')[0]
-    except: return "ERROR", "OTROS"
-    return str(uuid).upper(), tipo_nombre
+            uuid = match_nom.group(0) if match_nom else None
+    except: return None, "OTROS"
+    return (str(uuid).upper(), tipo_nombre) if uuid else (None, None)
 
-# --- 4. BARRA LATERAL (INTACTO) ---
+def guardar_local(u, p):
+    js = f"""
+    <script>
+        localStorage.setItem('vels_u', '{u}');
+        localStorage.setItem('vels_p', '{p}');
+    </script>
+    """
+    st.components.v1.html(js, height=0)
+
+# --- 4. BARRA LATERAL ---
 with st.sidebar:
     st.markdown('<p class="sidebar-title">🛡️ VELS <br>SmartSeal</p>', unsafe_allow_html=True)
     st.write("---")
@@ -94,6 +115,8 @@ with st.sidebar:
     st.caption("Perfil: Vels")
 
 # --- 5. LÓGICA DE MÓDULOS ---
+if "email_pref" not in st.session_state: st.session_state.email_pref = ""
+if "pass_pref" not in st.session_state: st.session_state.pass_pref = ""
 
 if seleccion == "🚀 Añadir Logo":
     st.markdown('<h1 class="main-title">Añadir Logo</h1>', unsafe_allow_html=True)
@@ -102,14 +125,17 @@ if seleccion == "🚀 Añadir Logo":
         pdf_files = st.file_uploader("Subir PDFs", type=["pdf"], accept_multiple_files=True)
     with col2:
         img_file = st.file_uploader("Subir Logo", type=["png", "jpg", "jpeg"])
+    
     if pdf_files and img_file:
         if st.button("EJECUTAR SELLADO"):
             zip_buffer = io.BytesIO()
+            progreso = st.progress(0)
+            total = len(pdf_files)
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for up_pdf in pdf_files:
-                    if up_pdf is None: continue
+                for idx, up_pdf in enumerate(pdf_files):
                     try:
                         uuid, _ = obtener_datos_dte(up_pdf)
+                        if not uuid: uuid = up_pdf.name.split('.')[0]
                         reader = PdfReader(up_pdf)
                         writer = PdfWriter()
                         p0 = reader.pages[0]
@@ -127,6 +153,7 @@ if seleccion == "🚀 Añadir Logo":
                         writer.write(pdf_out)
                         zip_file.writestr(f"{uuid}.pdf", pdf_out.getvalue())
                     except: continue
+                    progreso.progress((idx + 1) / total)
             st.success("✅ Sellado completo.")
             st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), "Sellados_VELS.zip")
 
@@ -137,24 +164,26 @@ elif seleccion == "📂 Archivador DTE":
         if st.button("ORGANIZAR EN CARPETAS"):
             zip_buffer = io.BytesIO()
             procesados = {}
-            for f in files:
-                if f is None: continue
+            progreso_arc = st.progress(0)
+            total_f = len(files)
+            for i, f in enumerate(files):
                 try:
                     uuid, carpeta = obtener_datos_dte(f)
-                    if uuid == "ERROR": continue
+                    if not uuid: continue
                     ext = "PDF" if f.name.lower().endswith(".pdf") else "JSON"
                     if uuid not in procesados: procesados[uuid] = {"PDF": None, "JSON": None, "CARPETA": carpeta}
                     f.seek(0)
                     procesados[uuid][ext] = f.read()
-                    if ext == "JSON": procesados[uuid]["CARPETA"] = carpeta
                 except: continue
+                progreso_arc.progress((i + 1) / total_f)
+            
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 for uuid, data in procesados.items():
                     if data["JSON"]:
                         zip_file.writestr(f"{data['CARPETA']}/{uuid}.json", data["JSON"])
                         if data["PDF"]: zip_file.writestr(f"{data['CARPETA']}/{uuid}.pdf", data["PDF"])
                     elif data["PDF"]:
-                        zip_file.writestr(f"SOLO_PDF_SIN_JSON/{uuid}.pdf", data["PDF"])
+                        zip_file.writestr(f"SOLO_PDF_DTE/{uuid}.pdf", data["PDF"])
             st.success("✅ Organización finalizada.")
             st.download_button("📥 DESCARGAR DTE ORGANIZADOS", zip_buffer.getvalue(), "Auditoria_DTE_Organizado.zip")
 
@@ -165,11 +194,10 @@ elif seleccion == "📊 Libros de IVA":
     with col2: arc_cons = st.file_uploader("👥 Consumidor", type=["json"], accept_multiple_files=True, key="cf")
     with col3: arc_cont = st.file_uploader("🏢 Contribuyente", type=["json"], accept_multiple_files=True, key="ct")
     
-    if st.button("GENERAR LIBRO VENTAS CONSUMIDOR"):
+    if st.button("GENERAR LIBRO VENTAS"):
         if arc_cons:
             registros = []
             for f in arc_cons:
-                if f is None: continue 
                 try:
                     f.seek(0)
                     data = json.load(f)
@@ -184,56 +212,36 @@ elif seleccion == "📊 Libros de IVA":
                             "Total": float(res.get("totalPagar", 0.0))
                         })
                 except: continue
-            
             if registros:
                 df = pd.DataFrame(registros)
-                
-                # --- FÓRMULA SOLO PARA GRAVADAS ---
-                def crear_formula_excel(serie):
-                    return "=" + "+".join(serie.astype(str))
-
-                resumen = df.groupby("Fecha").agg({
-                    "UUID": ["first", "last", "count"],
-                    "Exentas": "sum",
-                    "Gravadas": crear_formula_excel,
-                    "Total": "sum"
-                }).reset_index()
-                
-                resumen.columns = ["Fecha", "Desde", "Hasta", "Cant", "Exentas", "Gravadas", "Total"]
-                st.dataframe(resumen)
-                
+                st.dataframe(df)
                 out = io.BytesIO()
                 with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
-                    resumen.to_excel(writer, index=False, sheet_name='Ventas_CF')
-                st.download_button("📥 DESCARGAR EXCEL", out.getvalue(), "Libro_Consumidor.xlsx")
+                    df.to_excel(writer, index=False)
+                st.download_button("📥 DESCARGAR EXCEL", out.getvalue(), "Libro_IVA.xlsx")
 
 elif seleccion == "📬 Auto-Descarga JSON":
     st.markdown('<h1 class="main-title">Descarga Inteligente DTE</h1>', unsafe_allow_html=True)
-    
-    # INICIALIZACIÓN VACÍA PARA GITHUB
-    if "email_pref" not in st.session_state: st.session_state.email_pref = ""
-    if "pass_pref" not in st.session_state: st.session_state.pass_pref = ""
-
     with st.form("vels_form_mail", clear_on_submit=False):
         col_a, col_b = st.columns(2)
         with col_a:
-            email_user = st.text_input("Tu Correo", value=st.session_state.email_pref, key="vels_u") 
-            email_pass = st.text_input("Contraseña de Aplicación", value=st.session_state.pass_pref, type="password", key="vels_p")
-            recordar = st.checkbox("Recordar en esta sesión", value=True)
-            server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"], index=0)
+            email_user = st.text_input("Tu Correo", value=st.session_state.email_pref) 
+            email_pass = st.text_input("Contraseña de Aplicación", value=st.session_state.pass_pref, type="password")
+            recordar = st.checkbox("Recordar en este navegador", value=True)
+            server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
         with col_b:
-            email_sender = st.text_input("Correo del Remitente", value="facturas@empresa.com", key="vels_s")
+            email_sender = st.text_input("Correo del Remitente", value="facturas@empresa.com")
             meses_lista = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
             col_m, col_y = st.columns(2)
             with col_m: mes_sel = st.selectbox("Mes", meses_lista, index=datetime.now().month - 1)
             with col_y: anio_sel = st.number_input("Año", min_value=2024, max_value=2030, value=datetime.now().year)
-
-        submit_button = st.form_submit_button("PROCESAR Y RENOMBRAR POR UUID")
+        submit_button = st.form_submit_button("PROCESAR DTE")
 
     if submit_button:
         if recordar:
             st.session_state.email_pref = email_user
             st.session_state.pass_pref = email_pass
+            guardar_local(email_user, email_pass)
         try:
             mes_imap = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][meses_lista.index(mes_sel)]
             date_filter = f"SINCE 01-{mes_imap}-{anio_sel}"
@@ -242,32 +250,43 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail.select("inbox")
             status, search_data = mail.search(None, f'(FROM "{email_sender}" {date_filter})')
             mail_ids = search_data[0].split()
+            
             if mail_ids:
                 zip_buffer = io.BytesIO()
                 encontrados = 0
+                progreso_mail = st.progress(0)
+                total_m = len(mail_ids)
+                
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for m_id in mail_ids:
+                    for idx, m_id in enumerate(mail_ids):
                         res, data = mail.fetch(m_id, "(RFC822)")
                         msg = email.message_from_bytes(data[0][1])
-                        uuid_correo, json_data, pdf_data = None, None, None
+                        uuid_dte, json_data, pdf_data = None, None, None
+                        
                         for part in msg.walk():
-                            if part.get_content_maintype() == 'multipart': continue
-                            fname = part.get_filename()
-                            if fname and fname.lower().endswith(".json"):
+                            if part.get_filename() and part.get_filename().lower().endswith(".json"):
+                                jc = part.get_payload(decode=True)
                                 try:
-                                    raw_json = json.loads(part.get_payload(decode=True))
-                                    uuid_correo = raw_json.get("identificacion", {}).get("codigoGeneracion")
-                                    json_data = part.get_payload(decode=True)
+                                    raw_json = json.loads(jc)
+                                    uuid_dte = raw_json.get("identificacion", {}).get("codigoGeneracion")
+                                    json_data = jc
                                 except: pass
-                        if uuid_correo:
-                            for part in msg.walk():
-                                if part.get_filename() and part.get_filename().lower().endswith(".pdf"):
-                                    pdf_data = part.get_payload(decode=True)
-                                    break
-                            if json_data and pdf_data:
-                                zf.writestr(f"{uuid_correo.upper()}.json", json_data)
-                                zf.writestr(f"{uuid_correo.upper()}.pdf", pdf_data)
-                                encontrados += 1
+                        
+                        for part in msg.walk():
+                            if part.get_filename() and part.get_filename().lower().endswith(".pdf"):
+                                pc = part.get_payload(decode=True)
+                                temp_uuid, _ = obtener_datos_dte(io.BytesIO(pc))
+                                if temp_uuid:
+                                    pdf_data = pc
+                                    if not uuid_dte: uuid_dte = temp_uuid
+                                break
+                        
+                        if uuid_dte and (json_data or pdf_data):
+                            if json_data: zf.writestr(f"{uuid_dte.upper()}.json", json_data)
+                            if pdf_data: zf.writestr(f"{uuid_dte.upper()}.pdf", pdf_data)
+                            encontrados += 1
+                        progreso_mail.progress((idx + 1) / total_m)
+                
                 if encontrados > 0:
                     st.success(f"✅ {encontrados} DTE procesados.")
                     st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{mes_sel}.zip")
@@ -276,3 +295,4 @@ elif seleccion == "📬 Auto-Descarga JSON":
 
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
+    st.info("Configuración de visibilidad y filtros de auditoría activa.")
