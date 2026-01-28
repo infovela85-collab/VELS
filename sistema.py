@@ -202,7 +202,11 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
             mail.select("inbox")
-            status, search_data = mail.search(None, f'(FROM "{email_sender}" SINCE {imap_date})')
+            
+            # CAMBIO PUNTUAL: Se usa OR TEXT para encontrar el correo aunque tenga alias/nombre
+            # y se busca en todo el contenido del mensaje
+            status, search_data = mail.search(None, f'(TEXT "{email_sender}" SINCE {imap_date})')
+            
             mail_ids = search_data[0].split()
             if mail_ids:
                 zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
@@ -213,7 +217,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
                         msg = email.message_from_bytes(data[0][1])
                         uuid_dte, json_data, pdf_data = None, None, None
                         
-                        # --- MEJORA PUNTAL PARA REENVIADOS ---
                         for part in msg.walk():
                             content_type = part.get_content_type()
                             fn = part.get_filename()
@@ -238,7 +241,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
                                     u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
                                     if u_tmp: pdf_data, uuid_dte = payload, u_tmp
                                 except: pass
-                        # --- FIN MEJORA ---
                         
                         if uuid_dte and (json_data or pdf_data):
                             uuid_dte = uuid_dte.upper()
