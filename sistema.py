@@ -202,70 +202,63 @@ elif seleccion == "📬 Auto-Descarga JSON":
             imap_date = fecha_desde.strftime("%d-%b-%Y")
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
-            mail.select("inbox")
             
-            status, search_data = mail.search(None, f'(FROM "{email_sender}" SINCE {imap_date})')
-            mail_ids = search_data[0].split()
+            # --- LÓGICA DE ESCANEO TOTAL EN CARPETAS (RESTAURADA) ---
+            status, folder_list = mail.list()
+            zip_buffer, encontrados, uuids_procesados = io.BytesIO(), 0, set()
+            hay_correos = False
             
-            if mail_ids:
-                zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
-                uuids_procesados = set()
-                with zipfile.ZipFile(zip_buffer, "w") as zf_final:
-                    for idx, m_id in enumerate(mail_ids):
-                        res, data = mail.fetch(m_id, "(RFC822)")
-                        msg = email.message_from_bytes(data[0][1])
-                        
-                        # msg.walk() maneja correos reenviados y multiparts correctamente
-                        for part in msg.walk():
-                            fn = part.get_filename() or ""
-                            payload = part.get_payload(decode=True)
-                            if not payload: continue
-
-                            # LÓGICA PARA ARCHIVOS ZIP DENTRO DEL CORREO
-                            if fn.lower().endswith(".zip"):
-                                try:
-                                    with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
-                                        for z_name in z_in.namelist():
-                                            z_payload = z_in.read(z_name)
-                                            u_tmp = None
-                                            if z_name.lower().endswith(".json"):
-                                                try:
-                                                    raw = json.loads(z_payload)
-                                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
-                                                except: pass
-                                            elif z_name.lower().endswith(".pdf"):
-                                                u_tmp, _ = obtener_datos_dte(io.BytesIO(z_payload))
-                                            
-                                            if u_tmp and u_tmp.upper() not in uuids_procesados:
-                                                ext = "json" if z_name.lower().endswith(".json") else "pdf"
-                                                zf_final.writestr(f"{u_tmp.upper()}.{ext}", z_payload)
-                                                uuids_procesados.add(u_tmp.upper()); encontrados += 1
-                                except: pass
-
-                            # LÓGICA PARA JSON Y PDF DIRECTOS
-                            elif fn.lower().endswith(".json"):
-                                try:
-                                    raw = json.loads(payload)
-                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
+            with zipfile.ZipFile(zip_buffer, "w") as zf_final:
+                for f_info in folder_list:
+                    f_name = f_info.decode().split(' "/" ')[-1].strip('"')
+                    mail.select(f'"{f_name}"', readonly=True)
+                    res_search, data_search = mail.search(None, f'(FROM "{email_sender}" SINCE {imap_date})')
+                    ids = data_search[0].split()
+                    
+                    if ids:
+                        hay_correos = True
+                        for m_id in ids:
+                            res_fetch, data_fetch = mail.fetch(m_id, "(RFC822)")
+                            msg = email.message_from_bytes(data_fetch[0][1])
+                            for part in msg.walk():
+                                if part.get_content_maintype() == 'multipart': continue
+                                fn = part.get_filename() or ""
+                                payload = part.get_payload(decode=True)
+                                if not payload: continue
+                                
+                                # Escaneo profundo de ZIPs
+                                if fn.lower().endswith(".zip"):
+                                    try:
+                                        with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
+                                            for z_name in z_in.namelist():
+                                                z_p = z_in.read(z_name)
+                                                u_tmp = None
+                                                if z_name.lower().endswith(".json"):
+                                                    try: u_tmp = json.loads(z_p).get("identificacion", {}).get("codigoGeneracion")
+                                                    except: pass
+                                                elif z_name.lower().endswith(".pdf"): u_tmp, _ = obtener_datos_dte(io.BytesIO(z_p))
+                                                if u_tmp and u_tmp.upper() not in uuids_procesados:
+                                                    zf_final.writestr(f"{u_tmp.upper()}.{'json' if z_name.lower().endswith('.json') else 'pdf'}", z_p)
+                                                    uuids_procesados.add(u_tmp.upper()); encontrados += 1
+                                    except: pass
+                                # Escaneo de JSON/PDF directos
+                                elif fn.lower().endswith((".json", ".pdf")) or part.get_content_type() in ["application/json", "application/pdf"]:
+                                    u_tmp = None
+                                    if fn.lower().endswith(".json") or part.get_content_type() == "application/json":
+                                        try: u_tmp = json.loads(payload).get("identificacion", {}).get("codigoGeneracion")
+                                        except: pass
+                                    else: u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
                                     if u_tmp and u_tmp.upper() not in uuids_procesados:
-                                        zf_final.writestr(f"{u_tmp.upper()}.json", payload)
+                                        ext_f = "json" if (fn.lower().endswith(".json") or part.get_content_type() == "application/json") else "pdf"
+                                        zf_final.writestr(f"{u_tmp.upper()}.{ext_f}", payload)
                                         uuids_procesados.add(u_tmp.upper()); encontrados += 1
-                                except: pass
-                            elif fn.lower().endswith(".pdf"):
-                                u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
-                                if u_tmp and u_tmp.upper() not in uuids_procesados:
-                                    zf_final.writestr(f"{u_tmp.upper()}.pdf", payload)
-                                    uuids_procesados.add(u_tmp.upper()); encontrados += 1
-                                    
-                        progreso_mail.progress((idx + 1) / len(mail_ids))
-                
-                if encontrados > 0:
-                    st.success(f"✅ {encontrados} DTE procesados.")
-                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{fecha_desde.strftime('%d%m%Y')}.zip")
-                else:
-                    st.warning("Sin DTE válidos.")
+
+            # --- MENSAJES CORTOS ---
+            if not hay_correos: st.warning("No se encontraron correos.")
+            elif encontrados == 0: st.warning("Sin DTE válidos.")
             else:
-                st.warning("No se encontraron correos.")
+                st.success(f"✅ {encontrados} DTE procesados.")
+                st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{date.today().strftime('%d%m%Y')}.zip")
             mail.logout()
         except Exception as e: st.error(f"Error: {e}")
 
