@@ -183,7 +183,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
     with st.form("vels_form_mail", clear_on_submit=False):
         col_a, col_b = st.columns(2)
         with col_a:
-            # --- CAMPO FANTASMA ---
             st.markdown("""<input type="text" style="display:none"><input type="password" style="display:none">""", unsafe_allow_html=True)
             email_user = st.text_input("Tu Correo", value=st.session_state.email_pref) 
             email_pass = st.text_input("Contraseña de Aplicación", value=st.session_state.pass_pref, type="password")
@@ -215,25 +214,49 @@ elif seleccion == "📬 Auto-Descarga JSON":
                     for idx, m_id in enumerate(mail_ids):
                         res, data = mail.fetch(m_id, "(RFC822)")
                         msg = email.message_from_bytes(data[0][1])
+                        
+                        # msg.walk() maneja correos reenviados y multiparts correctamente
                         for part in msg.walk():
                             fn = part.get_filename() or ""
                             payload = part.get_payload(decode=True)
                             if not payload: continue
 
-                            if fn.lower().endswith((".json", ".pdf")):
-                                if fn.lower().endswith(".json"):
-                                    try:
-                                        raw = json.loads(payload)
-                                        u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
-                                        if u_tmp and u_tmp.upper() not in uuids_procesados:
-                                            zf_final.writestr(f"{u_tmp.upper()}.json", payload)
-                                            uuids_procesados.add(u_tmp.upper()); encontrados += 1
-                                    except: pass
-                                elif fn.lower().endswith(".pdf"):
-                                    u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
+                            # LÓGICA PARA ARCHIVOS ZIP DENTRO DEL CORREO
+                            if fn.lower().endswith(".zip"):
+                                try:
+                                    with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
+                                        for z_name in z_in.namelist():
+                                            z_payload = z_in.read(z_name)
+                                            u_tmp = None
+                                            if z_name.lower().endswith(".json"):
+                                                try:
+                                                    raw = json.loads(z_payload)
+                                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
+                                                except: pass
+                                            elif z_name.lower().endswith(".pdf"):
+                                                u_tmp, _ = obtener_datos_dte(io.BytesIO(z_payload))
+                                            
+                                            if u_tmp and u_tmp.upper() not in uuids_procesados:
+                                                ext = "json" if z_name.lower().endswith(".json") else "pdf"
+                                                zf_final.writestr(f"{u_tmp.upper()}.{ext}", z_payload)
+                                                uuids_procesados.add(u_tmp.upper()); encontrados += 1
+                                except: pass
+
+                            # LÓGICA PARA JSON Y PDF DIRECTOS
+                            elif fn.lower().endswith(".json"):
+                                try:
+                                    raw = json.loads(payload)
+                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
                                     if u_tmp and u_tmp.upper() not in uuids_procesados:
-                                        zf_final.writestr(f"{u_tmp.upper()}.pdf", payload)
+                                        zf_final.writestr(f"{u_tmp.upper()}.json", payload)
                                         uuids_procesados.add(u_tmp.upper()); encontrados += 1
+                                except: pass
+                            elif fn.lower().endswith(".pdf"):
+                                u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
+                                if u_tmp and u_tmp.upper() not in uuids_procesados:
+                                    zf_final.writestr(f"{u_tmp.upper()}.pdf", payload)
+                                    uuids_procesados.add(u_tmp.upper()); encontrados += 1
+                                    
                         progreso_mail.progress((idx + 1) / len(mail_ids))
                 
                 if encontrados > 0:
