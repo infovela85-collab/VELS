@@ -183,15 +183,17 @@ elif seleccion == "📬 Auto-Descarga JSON":
     with st.form("vels_form_mail", clear_on_submit=False):
         col_a, col_b = st.columns(2)
         with col_a:
+            # --- CAMPO FANTASMA PARA BLOQUEAR AUTOCOMPLETADO ---
             st.markdown("""<input type="text" style="display:none"><input type="password" style="display:none">""", unsafe_allow_html=True)
+            
             email_user = st.text_input("Tu Correo", value=st.session_state.email_pref) 
             email_pass = st.text_input("Contraseña de Aplicación", value=st.session_state.pass_pref, type="password")
             recordar = st.checkbox("Recordar en este navegador", value=True)
             server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
         with col_b:
-            email_sender = st.text_input("Correo del Remitente", value="erwin.castillo@goes.gob.sv")
+            email_sender = st.text_input("Correo del Remitente", value="facturas@empresa.com")
             col_f1, col_f2 = st.columns(2)
-            with col_f1: fecha_desde = st.date_input("Desde", value=date(2025, 1, 1), format="DD/MM/YYYY")
+            with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY")
             with col_f2: fecha_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY")
         submit_button = st.form_submit_button("PROCESAR DTE")
 
@@ -202,64 +204,87 @@ elif seleccion == "📬 Auto-Descarga JSON":
             imap_date = fecha_desde.strftime("%d-%b-%Y")
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
+            mail.select("inbox")
             
-            # --- TU LÓGICA DE CARPETAS ORIGINAL ---
-            status, folder_list = mail.list()
-            zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
-            uuids_procesados = set()
-            hay_correos = False
+            status, search_data = mail.search(None, f'(TEXT "{email_sender}" SINCE {imap_date})')
             
-            with zipfile.ZipFile(zip_buffer, "w") as zf_final:
-                for idx_f, folder_info in enumerate(folder_list):
-                    folder_name = folder_info.decode().split(' "/" ')[-1].strip('"')
-                    mail.select(f'"{folder_name}"', readonly=True)
-                    # Búsqueda original
-                    status_s, search_data = mail.search(None, f'(FROM "{email_sender}" SINCE {imap_date})')
-                    mail_ids = search_data[0].split()
-                    
-                    if mail_ids:
-                        hay_correos = True
-                        for m_id in mail_ids:
-                            res, data = mail.fetch(m_id, "(RFC822)")
-                            msg = email.message_from_bytes(data[0][1])
-                            for part in msg.walk():
-                                fn = part.get_filename() or ""
-                                payload = part.get_payload(decode=True)
-                                if not payload: continue
-                                
-                                # Procesamiento de archivos (idéntico al original)
-                                if fn.lower().endswith(".zip"):
+            mail_ids = search_data[0].split()
+            if mail_ids:
+                zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
+                uuids_procesados = set()
+                with zipfile.ZipFile(zip_buffer, "w") as zf_final:
+                    for idx, m_id in enumerate(mail_ids):
+                        res, data = mail.fetch(m_id, "(RFC822)")
+                        msg = email.message_from_bytes(data[0][1])
+                        
+                        for part in msg.walk():
+                            content_type = part.get_content_type()
+                            fn = part.get_filename()
+                            
+                            if not fn:
+                                if content_type == "application/json": fn = "temp.json"
+                                elif content_type == "application/pdf": fn = "temp.pdf"
+                                elif content_type == "application/zip": fn = "temp.zip"
+                                else: continue
+                            
+                            fn = fn.lower()
+                            payload = part.get_payload(decode=True)
+                            if not payload: continue
+
+                            if fn.endswith(".zip"):
+                                try:
                                     with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
                                         for z_name in z_in.namelist():
-                                            z_p = z_in.read(z_name)
+                                            z_payload = z_in.read(z_name)
                                             u_tmp = None
                                             if z_name.lower().endswith(".json"):
-                                                try: u_tmp = json.loads(z_p).get("identificacion", {}).get("codigoGeneracion")
+                                                try:
+                                                    raw = json.loads(z_payload)
+                                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
                                                 except: pass
-                                            elif z_name.lower().endswith(".pdf"): u_tmp, _ = obtener_datos_dte(io.BytesIO(z_p))
-                                            if u_tmp and u_tmp.upper() not in uuids_procesados:
-                                                zf_final.writestr(f"{u_tmp.upper()}.{'json' if z_name.lower().endswith('.json') else 'pdf'}", z_p)
-                                                uuids_procesados.add(u_tmp.upper()); encontrados += 1
-                                elif fn.lower().endswith((".json", ".pdf")):
-                                    u_tmp = None
-                                    if fn.lower().endswith(".json"):
-                                        try: u_tmp = json.loads(payload).get("identificacion", {}).get("codigoGeneracion")
-                                        except: pass
-                                    else: u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
-                                    if u_tmp and u_tmp.upper() not in uuids_procesados:
-                                        zf_final.writestr(f"{u_tmp.upper()}.{'json' if fn.lower().endswith('.json') else 'pdf'}", payload)
-                                        uuids_procesados.add(u_tmp.upper()); encontrados += 1
-                    # Actualización de la barra de progreso
-                    progreso_mail.progress((idx_f + 1) / len(folder_list))
+                                            elif z_name.lower().endswith(".pdf"):
+                                                u_tmp, _ = obtener_datos_dte(io.BytesIO(z_payload))
+                                            
+                                            if u_tmp:
+                                                u_tmp = u_tmp.upper()
+                                                if u_tmp not in uuids_procesados:
+                                                    ext_zip = "json" if z_name.lower().endswith(".json") else "pdf"
+                                                    zf_final.writestr(f"{u_tmp}.{ext_zip}", z_payload)
+                                                    uuids_procesados.add(u_tmp)
+                                                    encontrados += 1
+                                except: pass
 
-            # --- MENSAJES DE ESTADO (Único cambio solicitado) ---
-            if not hay_correos: st.warning("No se encontraron correos.")
-            elif encontrados == 0: st.warning("Sin DTE válidos.")
-            else:
-                st.success(f"✅ {encontrados} DTE procesados.")
-                st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{date.today().strftime('%d%m%Y')}.zip")
+                            elif fn.endswith(".json"):
+                                try:
+                                    raw = json.loads(payload)
+                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
+                                    if u_tmp:
+                                        u_tmp = u_tmp.upper()
+                                        if u_tmp not in uuids_procesados:
+                                            zf_final.writestr(f"{u_tmp}.json", payload)
+                                            uuids_procesados.add(u_tmp)
+                                            encontrados += 1
+                                except: pass
+                            elif fn.endswith(".pdf"):
+                                try:
+                                    u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
+                                    if u_tmp:
+                                        u_tmp = u_tmp.upper()
+                                        if u_tmp not in uuids_procesados:
+                                            zf_final.writestr(f"{u_tmp}.pdf", payload)
+                                            uuids_procesados.add(u_tmp)
+                                            encontrados += 1
+                                except: pass
+                        
+                        progreso_mail.progress((idx + 1) / len(mail_ids))
+                
+                if encontrados > 0:
+                    st.success(f"✅ {encontrados} DTE procesados.")
+                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{fecha_desde.strftime('%d%m%Y')}_al_{fecha_hasta.strftime('%d%m%Y')}.zip")
+                else: st.warning("No se encontraron DTE nuevos o válidos.")
             mail.logout()
         except Exception as e: st.error(f"Error: {e}")
 
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
+    st.info("Formato de fecha regional y control de duplicidad activo.")
