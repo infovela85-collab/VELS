@@ -203,57 +203,56 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
             
-            # --- LÓGICA DE ESCANEO TOTAL EN CARPETAS (RESTAURADA) ---
+            # --- TU LÓGICA DE CARPETAS ORIGINAL ---
             status, folder_list = mail.list()
-            zip_buffer, encontrados, uuids_procesados = io.BytesIO(), 0, set()
+            zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
+            uuids_procesados = set()
             hay_correos = False
             
             with zipfile.ZipFile(zip_buffer, "w") as zf_final:
-                for f_info in folder_list:
-                    f_name = f_info.decode().split(' "/" ')[-1].strip('"')
-                    mail.select(f'"{f_name}"', readonly=True)
-                    res_search, data_search = mail.search(None, f'(FROM "{email_sender}" SINCE {imap_date})')
-                    ids = data_search[0].split()
+                for idx_f, folder_info in enumerate(folder_list):
+                    folder_name = folder_info.decode().split(' "/" ')[-1].strip('"')
+                    mail.select(f'"{folder_name}"', readonly=True)
+                    # Búsqueda original
+                    status_s, search_data = mail.search(None, f'(FROM "{email_sender}" SINCE {imap_date})')
+                    mail_ids = search_data[0].split()
                     
-                    if ids:
+                    if mail_ids:
                         hay_correos = True
-                        for m_id in ids:
-                            res_fetch, data_fetch = mail.fetch(m_id, "(RFC822)")
-                            msg = email.message_from_bytes(data_fetch[0][1])
+                        for m_id in mail_ids:
+                            res, data = mail.fetch(m_id, "(RFC822)")
+                            msg = email.message_from_bytes(data[0][1])
                             for part in msg.walk():
-                                if part.get_content_maintype() == 'multipart': continue
                                 fn = part.get_filename() or ""
                                 payload = part.get_payload(decode=True)
                                 if not payload: continue
                                 
-                                # Escaneo profundo de ZIPs
+                                # Procesamiento de archivos (idéntico al original)
                                 if fn.lower().endswith(".zip"):
-                                    try:
-                                        with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
-                                            for z_name in z_in.namelist():
-                                                z_p = z_in.read(z_name)
-                                                u_tmp = None
-                                                if z_name.lower().endswith(".json"):
-                                                    try: u_tmp = json.loads(z_p).get("identificacion", {}).get("codigoGeneracion")
-                                                    except: pass
-                                                elif z_name.lower().endswith(".pdf"): u_tmp, _ = obtener_datos_dte(io.BytesIO(z_p))
-                                                if u_tmp and u_tmp.upper() not in uuids_procesados:
-                                                    zf_final.writestr(f"{u_tmp.upper()}.{'json' if z_name.lower().endswith('.json') else 'pdf'}", z_p)
-                                                    uuids_procesados.add(u_tmp.upper()); encontrados += 1
-                                    except: pass
-                                # Escaneo de JSON/PDF directos
-                                elif fn.lower().endswith((".json", ".pdf")) or part.get_content_type() in ["application/json", "application/pdf"]:
+                                    with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
+                                        for z_name in z_in.namelist():
+                                            z_p = z_in.read(z_name)
+                                            u_tmp = None
+                                            if z_name.lower().endswith(".json"):
+                                                try: u_tmp = json.loads(z_p).get("identificacion", {}).get("codigoGeneracion")
+                                                except: pass
+                                            elif z_name.lower().endswith(".pdf"): u_tmp, _ = obtener_datos_dte(io.BytesIO(z_p))
+                                            if u_tmp and u_tmp.upper() not in uuids_procesados:
+                                                zf_final.writestr(f"{u_tmp.upper()}.{'json' if z_name.lower().endswith('.json') else 'pdf'}", z_p)
+                                                uuids_procesados.add(u_tmp.upper()); encontrados += 1
+                                elif fn.lower().endswith((".json", ".pdf")):
                                     u_tmp = None
-                                    if fn.lower().endswith(".json") or part.get_content_type() == "application/json":
+                                    if fn.lower().endswith(".json"):
                                         try: u_tmp = json.loads(payload).get("identificacion", {}).get("codigoGeneracion")
                                         except: pass
                                     else: u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
                                     if u_tmp and u_tmp.upper() not in uuids_procesados:
-                                        ext_f = "json" if (fn.lower().endswith(".json") or part.get_content_type() == "application/json") else "pdf"
-                                        zf_final.writestr(f"{u_tmp.upper()}.{ext_f}", payload)
+                                        zf_final.writestr(f"{u_tmp.upper()}.{'json' if fn.lower().endswith('.json') else 'pdf'}", payload)
                                         uuids_procesados.add(u_tmp.upper()); encontrados += 1
+                    # Actualización de la barra de progreso
+                    progreso_mail.progress((idx_f + 1) / len(folder_list))
 
-            # --- MENSAJES CORTOS ---
+            # --- MENSAJES DE ESTADO (Único cambio solicitado) ---
             if not hay_correos: st.warning("No se encontraron correos.")
             elif encontrados == 0: st.warning("Sin DTE válidos.")
             else:
@@ -264,4 +263,3 @@ elif seleccion == "📬 Auto-Descarga JSON":
 
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
-    st.info("Ajustes del sistema activos.")
