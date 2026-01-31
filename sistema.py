@@ -183,9 +183,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
     with st.form("vels_form_mail", clear_on_submit=False):
         col_a, col_b = st.columns(2)
         with col_a:
-            # --- CAMPO FANTASMA PARA BLOQUEAR AUTOCOMPLETADO ---
-            st.markdown("""<input type="text" style="display:none"><input type="password" style="display:none">""", unsafe_allow_html=True)
-            
             email_user = st.text_input("Tu Correo", value=st.session_state.email_pref) 
             email_pass = st.text_input("Contraseña de Aplicación", value=st.session_state.pass_pref, type="password")
             recordar = st.checkbox("Recordar en este navegador", value=True)
@@ -206,6 +203,7 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail.login(email_user, email_pass)
             mail.select("inbox")
             
+            # Búsqueda flexible por texto y fecha
             status, search_data = mail.search(None, f'(TEXT "{email_sender}" SINCE {imap_date})')
             
             mail_ids = search_data[0].split()
@@ -231,6 +229,7 @@ elif seleccion == "📬 Auto-Descarga JSON":
                             payload = part.get_payload(decode=True)
                             if not payload: continue
 
+                            # --- NUEVA LÓGICA: PROCESAR ARCHIVOS ZIP ---
                             if fn.endswith(".zip"):
                                 try:
                                     with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
@@ -254,6 +253,7 @@ elif seleccion == "📬 Auto-Descarga JSON":
                                                     encontrados += 1
                                 except: pass
 
+                            # --- LÓGICA EXISTENTE: PROCESAR JSON Y PDF DIRECTOS ---
                             elif fn.endswith(".json"):
                                 try:
                                     raw = json.loads(payload)
@@ -279,7 +279,7 @@ elif seleccion == "📬 Auto-Descarga JSON":
                         progreso_mail.progress((idx + 1) / len(mail_ids))
                 
                 if encontrados > 0:
-                    st.success(f"✅ {encontrados} DTE procesados.")
+                    st.success(f"✅ {encontrados} DTE procesados (incluyendo archivos dentro de ZIP).")
                     st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{fecha_desde.strftime('%d%m%Y')}_al_{fecha_hasta.strftime('%d%m%Y')}.zip")
                 else: st.warning("No se encontraron DTE nuevos o válidos.")
             mail.logout()
