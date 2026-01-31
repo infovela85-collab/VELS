@@ -202,84 +202,54 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
             mail.select("inbox")
-            
-            # Búsqueda flexible por texto y fecha
-            status, search_data = mail.search(None, f'(TEXT "{email_sender}" SINCE {imap_date})')
-            
+            status, search_data = mail.search(None, f'(FROM "{email_sender}" SINCE {imap_date})')
             mail_ids = search_data[0].split()
             if mail_ids:
                 zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
                 uuids_procesados = set()
-                with zipfile.ZipFile(zip_buffer, "w") as zf_final:
+                with zipfile.ZipFile(zip_buffer, "w") as zf:
                     for idx, m_id in enumerate(mail_ids):
                         res, data = mail.fetch(m_id, "(RFC822)")
                         msg = email.message_from_bytes(data[0][1])
+                        uuid_dte, json_data, pdf_data = None, None, None
                         
+                        # --- MEJORA PUNTAL PARA REENVIADOS ---
                         for part in msg.walk():
                             content_type = part.get_content_type()
                             fn = part.get_filename()
                             
                             if not fn:
-                                if content_type == "application/json": fn = "temp.json"
-                                elif content_type == "application/pdf": fn = "temp.pdf"
-                                elif content_type == "application/zip": fn = "temp.zip"
+                                if content_type == "application/json": fn = "data.json"
+                                elif content_type == "application/pdf": fn = "data.pdf"
                                 else: continue
                             
                             fn = fn.lower()
                             payload = part.get_payload(decode=True)
                             if not payload: continue
 
-                            # --- NUEVA LÓGICA: PROCESAR ARCHIVOS ZIP ---
-                            if fn.endswith(".zip"):
-                                try:
-                                    with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
-                                        for z_name in z_in.namelist():
-                                            z_payload = z_in.read(z_name)
-                                            u_tmp = None
-                                            if z_name.lower().endswith(".json"):
-                                                try:
-                                                    raw = json.loads(z_payload)
-                                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
-                                                except: pass
-                                            elif z_name.lower().endswith(".pdf"):
-                                                u_tmp, _ = obtener_datos_dte(io.BytesIO(z_payload))
-                                            
-                                            if u_tmp:
-                                                u_tmp = u_tmp.upper()
-                                                if u_tmp not in uuids_procesados:
-                                                    ext_zip = "json" if z_name.lower().endswith(".json") else "pdf"
-                                                    zf_final.writestr(f"{u_tmp}.{ext_zip}", z_payload)
-                                                    uuids_procesados.add(u_tmp)
-                                                    encontrados += 1
-                                except: pass
-
-                            # --- LÓGICA EXISTENTE: PROCESAR JSON Y PDF DIRECTOS ---
-                            elif fn.endswith(".json"):
+                            if fn.endswith(".json"):
                                 try:
                                     raw = json.loads(payload)
                                     u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
-                                    if u_tmp:
-                                        u_tmp = u_tmp.upper()
-                                        if u_tmp not in uuids_procesados:
-                                            zf_final.writestr(f"{u_tmp}.json", payload)
-                                            uuids_procesados.add(u_tmp)
-                                            encontrados += 1
+                                    if u_tmp: uuid_dte, json_data = u_tmp, payload
                                 except: pass
                             elif fn.endswith(".pdf"):
                                 try:
                                     u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
-                                    if u_tmp:
-                                        u_tmp = u_tmp.upper()
-                                        if u_tmp not in uuids_procesados:
-                                            zf_final.writestr(f"{u_tmp}.pdf", payload)
-                                            uuids_procesados.add(u_tmp)
-                                            encontrados += 1
+                                    if u_tmp: pdf_data, uuid_dte = payload, u_tmp
                                 except: pass
+                        # --- FIN MEJORA ---
                         
+                        if uuid_dte and (json_data or pdf_data):
+                            uuid_dte = uuid_dte.upper()
+                            if uuid_dte not in uuids_procesados:
+                                if json_data: zf.writestr(f"{uuid_dte}.json", json_data)
+                                if pdf_data: zf.writestr(f"{uuid_dte}.pdf", pdf_data)
+                                uuids_procesados.add(uuid_dte)
+                                encontrados += 1
                         progreso_mail.progress((idx + 1) / len(mail_ids))
-                
                 if encontrados > 0:
-                    st.success(f"✅ {encontrados} DTE procesados (incluyendo archivos dentro de ZIP).")
+                    st.success(f"✅ {encontrados} DTE únicos procesados.")
                     st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{fecha_desde.strftime('%d%m%Y')}_al_{fecha_hasta.strftime('%d%m%Y')}.zip")
                 else: st.warning("No se encontraron DTE nuevos o válidos.")
             mail.logout()
