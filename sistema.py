@@ -288,3 +288,4 @@ elif seleccion == "📬 Auto-Descarga JSON":
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
     st.info("Formato de fecha regional y control de duplicidad activo.")
+
