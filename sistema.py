@@ -172,7 +172,6 @@ elif seleccion == "📊 Libros de IVA":
                     res = data.get("resumen", {})
                     cuerpo = data.get("cuerpoDocumento", [])
                     fecha = ident.get("fecEmi")
-                    # Lógica de limpieza aplicada
                     num_control = str(ident.get("numeroControl", "")).replace("-", "")
                     uuid_gen = str(ident.get("codigoGeneracion", "")).replace("-", "")
                     if fecha:
@@ -219,8 +218,8 @@ elif seleccion == "📬 Auto-Descarga JSON":
             recordar = st.checkbox("Recordar en este navegador", value=True)
             server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
         with col_b:
-            # CAMBIO QUIRÚRGICO: Etiqueta más clara para encontrar reenviados
-            buscar_texto = st.text_input("Palabra clave a buscar (ej: DTE o Correo origen)", value="DTE")
+            # CAMBIO SOLICITADO: Etiqueta actualizada y valor inicial vacío
+            buscar_texto = st.text_input("Correo del Remitente", value="")
             col_f1, col_f2 = st.columns(2)
             with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY")
             with col_f2: fecha_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY")
@@ -233,7 +232,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
             mail.select("inbox")
-            # CAMBIO QUIRÚRGICO: Búsqueda global en el texto del correo (incluye reenviados)
             status, search_data = mail.search(None, f'(TEXT "{buscar_texto}" SINCE {imap_date})')
             mail_ids = search_data[0].split()
             if mail_ids:
@@ -290,20 +288,4 @@ elif seleccion == "📬 Auto-Descarga JSON":
                                 try:
                                     u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
                                     if u_tmp:
-                                        u_tmp = u_tmp.upper()
-                                        if u_tmp not in uuids_procesados:
-                                            zf_final.writestr(f"{u_tmp}.pdf", payload)
-                                            uuids_procesados.add(u_tmp)
-                                            encontrados += 1
-                                except: pass
-                        progreso_mail.progress((idx + 1) / len(mail_ids))
-                if encontrados > 0:
-                    st.success(f"✅ {encontrados} DTE procesados.")
-                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{fecha_desde.strftime('%d%m%Y')}_al_{fecha_hasta.strftime('%d%m%Y')}.zip")
-                else: st.warning("No se encontraron DTE nuevos o válidos.")
-            mail.logout()
-        except Exception as e: st.error(f"Error: {e}")
-
-elif seleccion == "⚙️ Ajustes":
-    st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
-    st.info("Formato de fecha regional y control de duplicidad activo.")
+                                        u_tmp = u_tmp.
