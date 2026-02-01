@@ -218,7 +218,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
             recordar = st.checkbox("Recordar en este navegador", value=True)
             server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
         with col_b:
-            # CAMBIO REALIZADO: Etiqueta "Correo Remitente" y valor en blanco
             buscar_texto = st.text_input("Correo Remitente", value="")
             col_f1, col_f2 = st.columns(2)
             with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY")
@@ -232,7 +231,11 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
             mail.select("inbox")
-            status, search_data = mail.search(None, f'(TEXT "{buscar_texto}" SINCE {imap_date})')
+            
+            # --- MEJORA DE BÚSQUEDA ---
+            # Busca la palabra clave tanto en el cuerpo como en el asunto para máxima cobertura
+            status, search_data = mail.search(None, f'(OR SUBJECT "{buscar_texto}" TEXT "{buscar_texto}" SINCE {imap_date})')
+            
             mail_ids = search_data[0].split()
             if mail_ids:
                 zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
@@ -266,11 +269,11 @@ elif seleccion == "📬 Auto-Descarga JSON":
                                             elif z_name.lower().endswith(".pdf"):
                                                 u_tmp, _ = obtener_datos_dte(io.BytesIO(z_payload))
                                             if u_tmp:
-                                                u_tmp = u_tmp.upper()
+                                                u_tmp = str(u_tmp).upper()
                                                 if u_tmp not in uuids_procesados:
                                                     ext_zip = "json" if z_name.lower().endswith(".json") else "pdf"
                                                     zf_final.writestr(f"{u_tmp}.{ext_zip}", z_payload)
-                                                    uuids_procesados.add(u_tmp)
+                                                    # No agregamos al set aquí para permitir bajar PDF y JSON del mismo UUID
                                                     encontrados += 1
                                 except: pass
                             elif fn.endswith(".json"):
@@ -278,30 +281,26 @@ elif seleccion == "📬 Auto-Descarga JSON":
                                     raw = json.loads(payload)
                                     u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
                                     if u_tmp:
-                                        u_tmp = u_tmp.upper()
-                                        if u_tmp not in uuids_procesados:
-                                            zf_final.writestr(f"{u_tmp}.json", payload)
-                                            uuids_procesados.add(u_tmp)
-                                            encontrados += 1
+                                        u_tmp = str(u_tmp).upper()
+                                        zf_final.writestr(f"{u_tmp}.json", payload)
+                                        encontrados += 1
                                 except: pass
                             elif fn.endswith(".pdf"):
                                 try:
                                     u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
                                     if u_tmp:
-                                        u_tmp = u_tmp.upper()
-                                        if u_tmp not in uuids_procesados:
-                                            zf_final.writestr(f"{u_tmp}.pdf", payload)
-                                            uuids_procesados.add(u_tmp)
-                                            encontrados += 1
+                                        u_tmp = str(u_tmp).upper()
+                                        zf_final.writestr(f"{u_tmp}.pdf", payload)
+                                        encontrados += 1
                                 except: pass
                         progreso_mail.progress((idx + 1) / len(mail_ids))
                 if encontrados > 0:
-                    st.success(f"✅ {encontrados} DTE procesados.")
-                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{fecha_desde.strftime('%d%m%Y')}_al_{fecha_hasta.strftime('%d%m%Y')}.zip")
-                else: st.warning("No se encontraron DTE nuevos o válidos.")
+                    st.success(f"✅ {encontrados} archivos DTE procesados.")
+                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_Busqueda.zip")
+                else: st.warning("No se encontraron archivos válidos con ese criterio.")
             mail.logout()
-        except Exception as e: st.error(f"Error: {e}")
+        except Exception as e: st.error(f"Error de conexión o búsqueda: {e}")
 
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
-    st.info("Formato de fecha regional y control de duplicidad activo.")
+    st.info("Búsqueda ampliada (Asunto + Cuerpo) activa.")
