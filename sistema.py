@@ -172,7 +172,6 @@ elif seleccion == "📊 Libros de IVA":
                     res = data.get("resumen", {})
                     cuerpo = data.get("cuerpoDocumento", [])
                     fecha = ident.get("fecEmi")
-                    # Lógica de limpieza aplicada
                     num_control = str(ident.get("numeroControl", "")).replace("-", "")
                     uuid_gen = str(ident.get("codigoGeneracion", "")).replace("-", "")
                     if fecha:
@@ -219,8 +218,8 @@ elif seleccion == "📬 Auto-Descarga JSON":
             recordar = st.checkbox("Recordar en este navegador", value=True)
             server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
         with col_b:
-            # CAMBIO QUIRÚRGICO: Etiqueta más clara para encontrar reenviados
-            buscar_texto = st.text_input("Palabra clave a buscar (ej: DTE o Correo origen)", value="DTE")
+            # CAMBIO REALIZADO: Etiqueta "Correo Remitente" y valor en blanco
+            buscar_texto = st.text_input("Correo Remitente", value="")
             col_f1, col_f2 = st.columns(2)
             with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY")
             with col_f2: fecha_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY")
@@ -233,7 +232,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
             mail.select("inbox")
-            # CAMBIO QUIRÚRGICO: Búsqueda global en el texto del correo (incluye reenviados)
             status, search_data = mail.search(None, f'(TEXT "{buscar_texto}" SINCE {imap_date})')
             mail_ids = search_data[0].split()
             if mail_ids:
