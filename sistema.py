@@ -173,20 +173,22 @@ elif seleccion == "📊 Libros de IVA":
                     cuerpo = data.get("cuerpoDocumento", [])
                     fecha = ident.get("fecEmi")
                     num_control = ident.get("numeroControl")
+                    uuid_gen = ident.get("codigoGeneracion") # Obtener UUID
                     
                     if fecha:
                         if fecha not in datos_diarios:
                             datos_diarios[fecha] = {
                                 "Contador": 0,
                                 "Nums": [],
+                                "UUIDs": [], # Lista para UUIDs
                                 "Exentas": 0.0,
                                 "Gravadas_Lista": []
                             }
                         
                         datos_diarios[fecha]["Contador"] += 1
                         if num_control: datos_diarios[fecha]["Nums"].append(num_control)
+                        if uuid_gen: datos_diarios[fecha]["UUIDs"].append(uuid_gen) # Agregar UUID
                         datos_diarios[fecha]["Exentas"] += float(res.get("totalExenta", 0.0))
-                        # Recolectamos todos los ítems gravados para la fórmula
                         for item in cuerpo:
                             datos_diarios[fecha]["Gravadas_Lista"].append(str(item.get("ventaGravada", 0.0)))
                 except: continue
@@ -196,17 +198,17 @@ elif seleccion == "📊 Libros de IVA":
             for fecha in sorted(datos_diarios.keys()):
                 d = datos_diarios[fecha]
                 d["Nums"].sort()
-                primer = d["Nums"][0] if d["Nums"] else "N/A"
-                ultimo = d["Nums"][-1] if d["Nums"] else "N/A"
-                formula = "=" + "+".join(d["Gravadas_Lista"]) if d["Gravadas_Lista"] else "0.0"
+                d["UUIDs"].sort() # Ordenar UUIDs
                 
                 registros.append({
                     "Fecha": fecha,
-                    "Del DTE": primer,
-                    "Al DTE": ultimo,
+                    "Del DTE": d["Nums"][0] if d["Nums"] else "N/A",
+                    "Al DTE": d["Nums"][-1] if d["Nums"] else "N/A",
+                    "Del UUID": d["UUIDs"][0] if d["UUIDs"] else "N/A", # Primer UUID
+                    "Al UUID": d["UUIDs"][-1] if d["UUIDs"] else "N/A", # Último UUID
                     "Cantidad DTE": d["Contador"],
                     "Total Exentas": d["Exentas"],
-                    "Total Gravadas": formula
+                    "Total Gravadas": "=" + "+".join(d["Gravadas_Lista"]) if d["Gravadas_Lista"] else "0.0"
                 })
 
             if registros:
@@ -223,94 +225,4 @@ elif seleccion == "📬 Auto-Descarga JSON":
         with col_a:
             st.markdown("""<input type="text" style="display:none"><input type="password" style="display:none">""", unsafe_allow_html=True)
             email_user = st.text_input("Tu Correo", value=st.session_state.email_pref) 
-            email_pass = st.text_input("Contraseña de Aplicación", value=st.session_state.pass_pref, type="password")
-            recordar = st.checkbox("Recordar en este navegador", value=True)
-            server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
-        with col_b:
-            email_sender = st.text_input("Correo del Remitente", value="facturas@empresa.com")
-            col_f1, col_f2 = st.columns(2)
-            with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY")
-            with col_f2: fecha_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY")
-        submit_button = st.form_submit_button("PROCESAR DTE")
-
-    if submit_button:
-        st.session_state.email_pref, st.session_state.pass_pref = email_user, email_pass
-        if recordar: guardar_local(email_user, email_pass)
-        try:
-            imap_date = fecha_desde.strftime("%d-%b-%Y")
-            mail = imaplib.IMAP4_SSL(server_choice)
-            mail.login(email_user, email_pass)
-            mail.select("inbox")
-            status, search_data = mail.search(None, f'(TEXT "{email_sender}" SINCE {imap_date})')
-            mail_ids = search_data[0].split()
-            if mail_ids:
-                zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
-                uuids_procesados = set()
-                with zipfile.ZipFile(zip_buffer, "w") as zf_final:
-                    for idx, m_id in enumerate(mail_ids):
-                        res, data = mail.fetch(m_id, "(RFC822)")
-                        msg = email.message_from_bytes(data[0][1])
-                        for part in msg.walk():
-                            content_type = part.get_content_type()
-                            fn = part.get_filename()
-                            if not fn:
-                                if content_type == "application/json": fn = "temp.json"
-                                elif content_type == "application/pdf": fn = "temp.pdf"
-                                elif content_type == "application/zip": fn = "temp.zip"
-                                else: continue
-                            fn = fn.lower()
-                            payload = part.get_payload(decode=True)
-                            if not payload: continue
-                            if fn.endswith(".zip"):
-                                try:
-                                    with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
-                                        for z_name in z_in.namelist():
-                                            z_payload = z_in.read(z_name)
-                                            u_tmp = None
-                                            if z_name.lower().endswith(".json"):
-                                                try:
-                                                    raw = json.loads(z_payload)
-                                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
-                                                except: pass
-                                            elif z_name.lower().endswith(".pdf"):
-                                                u_tmp, _ = obtener_datos_dte(io.BytesIO(z_payload))
-                                            if u_tmp:
-                                                u_tmp = u_tmp.upper()
-                                                if u_tmp not in uuids_procesados:
-                                                    ext_zip = "json" if z_name.lower().endswith(".json") else "pdf"
-                                                    zf_final.writestr(f"{u_tmp}.{ext_zip}", z_payload)
-                                                    uuids_procesados.add(u_tmp)
-                                                    encontrados += 1
-                                except: pass
-                            elif fn.endswith(".json"):
-                                try:
-                                    raw = json.loads(payload)
-                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
-                                    if u_tmp:
-                                        u_tmp = u_tmp.upper()
-                                        if u_tmp not in uuids_procesados:
-                                            zf_final.writestr(f"{u_tmp}.json", payload)
-                                            uuids_procesados.add(u_tmp)
-                                            encontrados += 1
-                                except: pass
-                            elif fn.endswith(".pdf"):
-                                try:
-                                    u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
-                                    if u_tmp:
-                                        u_tmp = u_tmp.upper()
-                                        if u_tmp not in uuids_procesados:
-                                            zf_final.writestr(f"{u_tmp}.pdf", payload)
-                                            uuids_procesados.add(u_tmp)
-                                            encontrados += 1
-                                except: pass
-                        progreso_mail.progress((idx + 1) / len(mail_ids))
-                if encontrados > 0:
-                    st.success(f"✅ {encontrados} DTE procesados.")
-                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{fecha_desde.strftime('%d%m%Y')}_al_{fecha_hasta.strftime('%d%m%Y')}.zip")
-                else: st.warning("No se encontraron DTE nuevos o válidos.")
-            mail.logout()
-        except Exception as e: st.error(f"Error: {e}")
-
-elif seleccion == "⚙️ Ajustes":
-    st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
-    st.info("Formato de fecha regional y control de duplicidad activo.")
+            email_pass = st.text_input("Contraseña de Aplicación", value=
