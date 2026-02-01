@@ -218,14 +218,5 @@ elif seleccion == "📬 Auto-Descarga JSON":
             recordar = st.checkbox("Recordar en este navegador", value=True)
             server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
         with col_b:
-            # CORRECCIÓN: Sin valor predeterminado y nombre correcto
-            buscar_texto = st.text_input("Correo del Remitente", value="")
-            col_f1, col_f2 = st.columns(2)
-            with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY")
-            with col_f2: fecha_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY")
-        submit_button = st.form_submit_button("PROCESAR DTE")
-    if submit_button:
-        st.session_state.email_pref, st.session_state.pass_pref = email_user, email_pass
-        if recordar: guardar_local(email_user, email_pass)
-        try:
-            imap_date = fecha
+            # CAMBIO SOLICITADO: Etiqueta actualizada y valor inicial vacío
+            buscar_texto = st.text_input
