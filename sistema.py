@@ -162,34 +162,59 @@ elif seleccion == "📊 Libros de IVA":
     with col3: arc_cont = st.file_uploader("🏢 Contribuyente", type=["json"], accept_multiple_files=True, key="ct")
     if st.button("GENERAR LIBRO VENTAS"):
         if arc_cons:
-            registros = []
-            for f in arc_cons:
+            datos_diarios = {}
+            progreso_iva = st.progress(0)
+            for idx, f in enumerate(arc_cons):
                 try:
                     f.seek(0)
                     data = json.load(f)
-                    ident, res = data.get("identificacion", {}), data.get("resumen", {})
+                    ident = data.get("identificacion", {})
+                    res = data.get("resumen", {})
                     cuerpo = data.get("cuerpoDocumento", [])
+                    fecha = ident.get("fecEmi")
+                    num_control = ident.get("numeroControl")
                     
-                    if ident.get("codigoGeneracion"):
-                        # Extraer montos para crear la fórmula aritmética de Excel
-                        lista_gravados = [str(item.get("ventaGravada", 0.0)) for item in cuerpo]
-                        formula_gravada = "=" + "+".join(lista_gravados) if lista_gravados else 0.0
+                    if fecha:
+                        if fecha not in datos_diarios:
+                            datos_diarios[fecha] = {
+                                "Contador": 0,
+                                "Nums": [],
+                                "Exentas": 0.0,
+                                "Gravadas_Lista": []
+                            }
                         
-                        registros.append({
-                            "Fecha": ident.get("fecEmi"), 
-                            "UUID": ident.get("codigoGeneracion"), 
-                            "Num. DTE": ident.get("numeroControl"),
-                            "Exentas": float(res.get("totalExenta", 0.0)), 
-                            "Gravadas": formula_gravada, 
-                            "Total": float(res.get("totalPagar", 0.0))
-                        })
+                        datos_diarios[fecha]["Contador"] += 1
+                        if num_control: datos_diarios[fecha]["Nums"].append(num_control)
+                        datos_diarios[fecha]["Exentas"] += float(res.get("totalExenta", 0.0))
+                        # Recolectamos todos los ítems gravados para la fórmula
+                        for item in cuerpo:
+                            datos_diarios[fecha]["Gravadas_Lista"].append(str(item.get("ventaGravada", 0.0)))
                 except: continue
+                progreso_iva.progress((idx + 1) / len(arc_cons))
+            
+            registros = []
+            for fecha in sorted(datos_diarios.keys()):
+                d = datos_diarios[fecha]
+                d["Nums"].sort()
+                primer = d["Nums"][0] if d["Nums"] else "N/A"
+                ultimo = d["Nums"][-1] if d["Nums"] else "N/A"
+                formula = "=" + "+".join(d["Gravadas_Lista"]) if d["Gravadas_Lista"] else "0.0"
+                
+                registros.append({
+                    "Fecha": fecha,
+                    "Del DTE": primer,
+                    "Al DTE": ultimo,
+                    "Cantidad DTE": d["Contador"],
+                    "Total Exentas": d["Exentas"],
+                    "Total Gravadas": formula
+                })
+
             if registros:
                 df = pd.DataFrame(registros)
                 st.dataframe(df)
                 out = io.BytesIO()
                 with pd.ExcelWriter(out, engine='xlsxwriter') as writer: df.to_excel(writer, index=False)
-                st.download_button("📥 DESCARGAR EXCEL", out.getvalue(), "Libro_IVA.xlsx")
+                st.download_button("📥 DESCARGAR EXCEL", out.getvalue(), "Libro_IVA_Aglomerado.xlsx")
 
 elif seleccion == "📬 Auto-Descarga JSON":
     st.markdown('<h1 class="main-title">Descarga Inteligente DTE</h1>', unsafe_allow_html=True)
