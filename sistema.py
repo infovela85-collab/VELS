@@ -176,13 +176,7 @@ elif seleccion == "📊 Libros de IVA":
                     uuid_gen = ident.get("codigoGeneracion")
                     if fecha:
                         if fecha not in datos_diarios:
-                            datos_diarios[fecha] = {
-                                "Contador": 0,
-                                "Nums": [],
-                                "UUIDs": [],
-                                "Exentas": 0.0,
-                                "Gravadas_Lista": []
-                            }
+                            datos_diarios[fecha] = {"Contador": 0, "Nums": [], "UUIDs": [], "Exentas": 0.0, "Gravadas_Lista": []}
                         datos_diarios[fecha]["Contador"] += 1
                         if num_control: datos_diarios[fecha]["Nums"].append(num_control)
                         if uuid_gen: datos_diarios[fecha]["UUIDs"].append(uuid_gen)
@@ -277,3 +271,36 @@ elif seleccion == "📬 Auto-Descarga JSON":
                                                     zf_final.writestr(f"{u_tmp}.{ext_zip}", z_payload)
                                                     uuids_procesados.add(u_tmp)
                                                     encontrados += 1
+                                except: pass
+                            elif fn.endswith(".json"):
+                                try:
+                                    raw = json.loads(payload)
+                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
+                                    if u_tmp:
+                                        u_tmp = u_tmp.upper()
+                                        if u_tmp not in uuids_procesados:
+                                            zf_final.writestr(f"{u_tmp}.json", payload)
+                                            uuids_procesados.add(u_tmp)
+                                            encontrados += 1
+                                except: pass
+                            elif fn.endswith(".pdf"):
+                                try:
+                                    u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
+                                    if u_tmp:
+                                        u_tmp = u_tmp.upper()
+                                        if u_tmp not in uuids_procesados:
+                                            zf_final.writestr(f"{u_tmp}.pdf", payload)
+                                            uuids_procesados.add(u_tmp)
+                                            encontrados += 1
+                                except: pass
+                        progreso_mail.progress((idx + 1) / len(mail_ids))
+                if encontrados > 0:
+                    st.success(f"✅ {encontrados} DTE procesados.")
+                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_{fecha_desde.strftime('%d%m%Y')}_al_{fecha_hasta.strftime('%d%m%Y')}.zip")
+                else: st.warning("No se encontraron DTE nuevos o válidos.")
+            mail.logout()
+        except Exception as e: st.error(f"Error: {e}")
+
+elif seleccion == "⚙️ Ajustes":
+    st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
+    st.info("Formato de fecha regional y control de duplicidad activo.")
