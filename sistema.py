@@ -173,21 +173,21 @@ elif seleccion == "📊 Libros de IVA":
                     cuerpo = data.get("cuerpoDocumento", [])
                     fecha = ident.get("fecEmi")
                     num_control = ident.get("numeroControl")
-                    uuid_gen = ident.get("codigoGeneracion") # Obtener UUID
+                    uuid_gen = ident.get("codigoGeneracion") # <--- NUEVO
                     
                     if fecha:
                         if fecha not in datos_diarios:
                             datos_diarios[fecha] = {
                                 "Contador": 0,
                                 "Nums": [],
-                                "UUIDs": [], # Lista para UUIDs
+                                "UUIDs": [], # <--- NUEVO
                                 "Exentas": 0.0,
                                 "Gravadas_Lista": []
                             }
                         
                         datos_diarios[fecha]["Contador"] += 1
                         if num_control: datos_diarios[fecha]["Nums"].append(num_control)
-                        if uuid_gen: datos_diarios[fecha]["UUIDs"].append(uuid_gen) # Agregar UUID
+                        if uuid_gen: datos_diarios[fecha]["UUIDs"].append(uuid_gen) # <--- NUEVO
                         datos_diarios[fecha]["Exentas"] += float(res.get("totalExenta", 0.0))
                         for item in cuerpo:
                             datos_diarios[fecha]["Gravadas_Lista"].append(str(item.get("ventaGravada", 0.0)))
@@ -196,33 +196,3 @@ elif seleccion == "📊 Libros de IVA":
             
             registros = []
             for fecha in sorted(datos_diarios.keys()):
-                d = datos_diarios[fecha]
-                d["Nums"].sort()
-                d["UUIDs"].sort() # Ordenar UUIDs
-                
-                registros.append({
-                    "Fecha": fecha,
-                    "Del DTE": d["Nums"][0] if d["Nums"] else "N/A",
-                    "Al DTE": d["Nums"][-1] if d["Nums"] else "N/A",
-                    "Del UUID": d["UUIDs"][0] if d["UUIDs"] else "N/A", # Primer UUID
-                    "Al UUID": d["UUIDs"][-1] if d["UUIDs"] else "N/A", # Último UUID
-                    "Cantidad DTE": d["Contador"],
-                    "Total Exentas": d["Exentas"],
-                    "Total Gravadas": "=" + "+".join(d["Gravadas_Lista"]) if d["Gravadas_Lista"] else "0.0"
-                })
-
-            if registros:
-                df = pd.DataFrame(registros)
-                st.dataframe(df)
-                out = io.BytesIO()
-                with pd.ExcelWriter(out, engine='xlsxwriter') as writer: df.to_excel(writer, index=False)
-                st.download_button("📥 DESCARGAR EXCEL", out.getvalue(), "Libro_IVA_Aglomerado.xlsx")
-
-elif seleccion == "📬 Auto-Descarga JSON":
-    st.markdown('<h1 class="main-title">Descarga Inteligente DTE</h1>', unsafe_allow_html=True)
-    with st.form("vels_form_mail", clear_on_submit=False):
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown("""<input type="text" style="display:none"><input type="password" style="display:none">""", unsafe_allow_html=True)
-            email_user = st.text_input("Tu Correo", value=st.session_state.email_pref) 
-            email_pass = st.text_input("Contraseña de Aplicación", value=
