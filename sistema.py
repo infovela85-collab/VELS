@@ -172,8 +172,9 @@ elif seleccion == "📊 Libros de IVA":
                     res = data.get("resumen", {})
                     cuerpo = data.get("cuerpoDocumento", [])
                     fecha = ident.get("fecEmi")
-                    num_control = ident.get("numeroControl")
-                    uuid_gen = ident.get("codigoGeneracion")
+                    # CAMBIO QUIRÚRGICO 2: Quitar guiones a Control y UUID
+                    num_control = str(ident.get("numeroControl", "")).replace("-", "")
+                    uuid_gen = str(ident.get("codigoGeneracion", "")).replace("-", "")
                     if fecha:
                         if fecha not in datos_diarios:
                             datos_diarios[fecha] = {"Contador": 0, "Nums": [], "UUIDs": [], "Exentas": 0.0, "Gravadas_Lista": []}
@@ -194,8 +195,9 @@ elif seleccion == "📊 Libros de IVA":
                     "Fecha": fecha,
                     "Del DTE": d["Nums"][0] if d["Nums"] else "N/A",
                     "Al DTE": d["Nums"][-1] if d["Nums"] else "N/A",
-                    "Del UUID": d["UUIDs"][0] if d["UUIDs"] else "N/A",
-                    "Al UUID": d["UUIDs"][-1] if d["UUIDs"] else "N/A",
+                    # CAMBIO QUIRÚRGICO 1: Nuevos nombres de encabezado
+                    "Del Cod Gen.": d["UUIDs"][0] if d["UUIDs"] else "N/A",
+                    "Al Cod Gen.": d["UUIDs"][-1] if d["UUIDs"] else "N/A",
                     "Cantidad DTE": d["Contador"],
                     "Total Exentas": d["Exentas"],
                     "Total Gravadas": "=" + "+".join(d["Gravadas_Lista"]) if d["Gravadas_Lista"] else "0.0"
