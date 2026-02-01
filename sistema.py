@@ -172,7 +172,7 @@ elif seleccion == "📊 Libros de IVA":
                     res = data.get("resumen", {})
                     cuerpo = data.get("cuerpoDocumento", [])
                     fecha = ident.get("fecEmi")
-                    # CAMBIO QUIRÚRGICO 2: Quitar guiones a Control y UUID
+                    # Lógica de limpieza aplicada
                     num_control = str(ident.get("numeroControl", "")).replace("-", "")
                     uuid_gen = str(ident.get("codigoGeneracion", "")).replace("-", "")
                     if fecha:
@@ -195,7 +195,6 @@ elif seleccion == "📊 Libros de IVA":
                     "Fecha": fecha,
                     "Del DTE": d["Nums"][0] if d["Nums"] else "N/A",
                     "Al DTE": d["Nums"][-1] if d["Nums"] else "N/A",
-                    # CAMBIO QUIRÚRGICO 1: Nuevos nombres de encabezado
                     "Del Cod Gen.": d["UUIDs"][0] if d["UUIDs"] else "N/A",
                     "Al Cod Gen.": d["UUIDs"][-1] if d["UUIDs"] else "N/A",
                     "Cantidad DTE": d["Contador"],
@@ -220,7 +219,8 @@ elif seleccion == "📬 Auto-Descarga JSON":
             recordar = st.checkbox("Recordar en este navegador", value=True)
             server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
         with col_b:
-            email_sender = st.text_input("Correo del Remitente", value="facturas@empresa.com")
+            # CAMBIO QUIRÚRGICO: Etiqueta más clara para encontrar reenviados
+            buscar_texto = st.text_input("Palabra clave a buscar (ej: DTE o Correo origen)", value="DTE")
             col_f1, col_f2 = st.columns(2)
             with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY")
             with col_f2: fecha_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY")
@@ -233,7 +233,8 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
             mail.select("inbox")
-            status, search_data = mail.search(None, f'(TEXT "{email_sender}" SINCE {imap_date})')
+            # CAMBIO QUIRÚRGICO: Búsqueda global en el texto del correo (incluye reenviados)
+            status, search_data = mail.search(None, f'(TEXT "{buscar_texto}" SINCE {imap_date})')
             mail_ids = search_data[0].split()
             if mail_ids:
                 zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
