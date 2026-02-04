@@ -232,6 +232,7 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail.login(email_user, email_pass)
             mail.select("inbox")
             
+            # Buscamos correos desde la fecha
             status, search_data = mail.search(None, f'(OR SUBJECT "{buscar_texto}" TEXT "{buscar_texto}" SINCE {imap_date})')
             
             mail_ids = search_data[0].split()
@@ -242,25 +243,25 @@ elif seleccion == "📬 Auto-Descarga JSON":
                         res, data = mail.fetch(m_id, "(RFC822)")
                         msg = email.message_from_bytes(data[0][1])
                         for part in msg.walk():
-                            # Se eliminó la restricción por nombre de archivo; ahora revisa el contenido
+                            if part.get_content_maintype() == 'multipart': continue
                             payload = part.get_payload(decode=True)
                             if not payload: continue
 
-                            # CASO JSON: Verificación interna del contenido
+                            # 1. Intentar tratarlo como JSON primero (sin importar extensión)
                             try:
-                                raw = json.loads(payload)
-                                u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
-                                if u_tmp:
-                                    zf_final.writestr(f"{str(u_tmp).upper()}.json", payload)
+                                raw_json = json.loads(payload.decode('utf-8', errors='ignore'))
+                                uuid_j = raw_json.get("identificacion", {}).get("codigoGeneracion")
+                                if uuid_j:
+                                    zf_final.writestr(f"{str(uuid_j).upper()}.json", payload)
                                     encontrados += 1
-                                    continue # Si ya es JSON, pasamos a la siguiente parte
+                                    continue # Ya lo procesamos, saltar al siguiente part
                             except: pass
 
-                            # CASO PDF: Verificación mediante la función core
+                            # 2. Si no es JSON, intentar como PDF
                             try:
-                                u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
-                                if u_tmp:
-                                    zf_final.writestr(f"{str(u_tmp).upper()}.pdf", payload)
+                                uuid_p, _ = obtener_datos_dte(io.BytesIO(payload))
+                                if uuid_p:
+                                    zf_final.writestr(f"{str(uuid_p).upper()}.pdf", payload)
                                     encontrados += 1
                             except: pass
                             
