@@ -59,11 +59,18 @@ def obtener_datos_dte(archivo):
         if archivo is None: return None, "OTROS"
         nombre_original = getattr(archivo, 'name', "").upper()
         archivo.seek(0)
-        if nombre_original.endswith(".JSON"):
-            data = json.load(archivo)
+        
+        # LÓGICA PARA JSON (Basada en tu archivo)
+        if nombre_original.endswith(".JSON") or ".json" in nombre_original.lower():
+            content = archivo.read()
+            data = json.loads(content)
+            # Buscamos el UUID según tu estructura
             uuid = data.get("identificacion", {}).get("codigoGeneracion")
-            codigo_tipo = data.get("identificacion", {}).get("tipoDte")
-            tipo_nombre = catalogo.get(str(codigo_tipo), "OTROS_DOCUMENTOS")
+            cod_dte = str(data.get("identificacion", {}).get("tipoDte", ""))
+            tipo_nombre = catalogo.get(cod_dte, "OTROS_DOCUMENTOS")
+            archivo.seek(0) # Reset para re-uso
+        
+        # LÓGICA PARA PDF
         else:
             reader = PdfReader(archivo)
             texto = "".join([p.extract_text() or "" for p in reader.pages])
@@ -74,10 +81,15 @@ def obtener_datos_dte(archivo):
                     if nombre in texto.upper() or f"TIPO DE DOCUMENTO: {codigo}" in texto.upper():
                         tipo_nombre = nombre
                         break
+        
+        # Si todo falla, intentamos por nombre de archivo
         if not uuid and nombre_original:
             match_nom = re.search(patron_uuid, nombre_original)
             uuid = match_nom.group(0) if match_nom else None
-    except: return None, "OTROS"
+            
+    except Exception: 
+        return None, "OTROS"
+        
     return (str(uuid).upper(), tipo_nombre) if uuid else (None, None)
 
 def guardar_local(u, p):
@@ -231,47 +243,62 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail = imaplib.IMAP4_SSL(server_choice)
             mail.login(email_user, email_pass)
             mail.select("inbox")
+            
+            # Buscamos de forma más agresiva
             status, search_data = mail.search(None, f'(OR SUBJECT "{buscar_texto}" TEXT "{buscar_texto}" SINCE {imap_date})')
             mail_ids = search_data[0].split()
+            
             if mail_ids:
                 zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
                 with zipfile.ZipFile(zip_buffer, "w") as zf_final:
                     for idx, m_id in enumerate(mail_ids):
                         res, data = mail.fetch(m_id, "(RFC822)")
                         msg = email.message_from_bytes(data[0][1])
+                        
                         for part in msg.walk():
+                            if part.get_content_maintype() == 'multipart': continue
                             fn = part.get_filename()
-                            if not fn: continue
-                            fn = fn.lower()
                             payload = part.get_payload(decode=True)
                             if not payload: continue
-
-                            # Procesar ZIPs adjuntos
-                            if fn.endswith(".zip"):
+                            
+                            # Si no tiene nombre de archivo, inventamos uno temporal para procesarlo
+                            temp_name = fn if fn else ("file.json" if part.get_content_type()=="application/json" else "file.pdf")
+                            
+                            # PROCESAR ZIP
+                            if temp_name.lower().endswith(".zip"):
                                 try:
                                     with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
                                         for z_name in z_in.namelist():
-                                            z_p = z_in.read(z_name)
-                                            u_tmp, _ = obtener_datos_dte(io.BytesIO(z_p))
+                                            z_payload = z_in.read(z_name)
+                                            # Creamos un objeto virtual para obtener_datos
+                                            v_file = io.BytesIO(z_payload)
+                                            v_file.name = z_name
+                                            u_tmp, _ = obtener_datos_dte(v_file)
                                             if u_tmp:
                                                 ext = "json" if z_name.lower().endswith(".json") else "pdf"
-                                                zf_final.writestr(f"{u_tmp}.{ext}", z_p)
+                                                zf_final.writestr(f"{u_tmp}.{ext}", z_payload)
                                                 encontrados += 1
                                 except: pass
-                            # Procesar JSON o PDF directos
-                            elif fn.endswith(".json") or fn.endswith(".pdf"):
-                                u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
+                                
+                            # PROCESAR JSON O PDF DIRECTO
+                            else:
+                                v_file = io.BytesIO(payload)
+                                v_file.name = temp_name
+                                u_tmp, _ = obtener_datos_dte(v_file)
                                 if u_tmp:
-                                    ext = "json" if fn.endswith(".json") else "pdf"
+                                    ext = "json" if temp_name.lower().endswith(".json") else "pdf"
                                     zf_final.writestr(f"{u_tmp}.{ext}", payload)
                                     encontrados += 1
+                                    
                         progreso_mail.progress((idx + 1) / len(mail_ids))
+                        
                 if encontrados > 0:
-                    st.success(f"✅ {encontrados} archivos DTE procesados correctamente.")
-                    st.download_button("📥 DESCARGAR TODO (.ZIP)", zip_buffer.getvalue(), f"DTE_Busqueda.zip")
-                else: st.warning("No se encontraron archivos válidos en los correos.")
+                    st.success(f"✅ ¡Se encontraron {encontrados} archivos!")
+                    st.download_button("📥 DESCARGAR TODO", zip_buffer.getvalue(), "DTE_Recuperados.zip")
+                else: st.warning("Correos encontrados, pero sin archivos DTE válidos adjuntos.")
+            else: st.info("No se encontraron correos en ese rango de fecha.")
             mail.logout()
-        except Exception as e: st.error(f"Error: {e}")
+        except Exception as e: st.error(f"Error técnico: {e}")
 
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
