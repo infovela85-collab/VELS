@@ -240,37 +240,36 @@ elif seleccion == "📬 Auto-Descarga JSON":
                         res, data = mail.fetch(m_id, "(RFC822)")
                         msg = email.message_from_bytes(data[0][1])
                         for part in msg.walk():
-                            if part.get_content_maintype() == 'multipart': continue
                             fn = part.get_filename()
                             if not fn: continue
                             fn = fn.lower()
                             payload = part.get_payload(decode=True)
                             if not payload: continue
 
-                            # Caso JSON directo o ZIP
-                            if fn.endswith(".json") or fn.endswith(".pdf") or fn.endswith(".zip"):
-                                if fn.endswith(".zip"):
-                                    try:
-                                        with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
-                                            for z_name in z_in.namelist():
-                                                z_p = z_in.read(z_name)
-                                                u_tmp, _ = obtener_datos_dte(io.BytesIO(z_p))
-                                                if u_tmp:
-                                                    ext = "json" if z_name.lower().endswith(".json") else "pdf"
-                                                    zf_final.writestr(f"{u_tmp}.{ext}", z_p)
-                                                    encontrados += 1
-                                    except: pass
-                                else:
-                                    u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
-                                    if u_tmp:
-                                        ext = "json" if fn.endswith(".json") else "pdf"
-                                        zf_final.writestr(f"{u_tmp}.{ext}", payload)
-                                        encontrados += 1
+                            # Procesar ZIPs adjuntos
+                            if fn.endswith(".zip"):
+                                try:
+                                    with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
+                                        for z_name in z_in.namelist():
+                                            z_p = z_in.read(z_name)
+                                            u_tmp, _ = obtener_datos_dte(io.BytesIO(z_p))
+                                            if u_tmp:
+                                                ext = "json" if z_name.lower().endswith(".json") else "pdf"
+                                                zf_final.writestr(f"{u_tmp}.{ext}", z_p)
+                                                encontrados += 1
+                                except: pass
+                            # Procesar JSON o PDF directos
+                            elif fn.endswith(".json") or fn.endswith(".pdf"):
+                                u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
+                                if u_tmp:
+                                    ext = "json" if fn.endswith(".json") else "pdf"
+                                    zf_final.writestr(f"{u_tmp}.{ext}", payload)
+                                    encontrados += 1
                         progreso_mail.progress((idx + 1) / len(mail_ids))
                 if encontrados > 0:
-                    st.success(f"✅ {encontrados} archivos DTE procesados.")
-                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_Busqueda.zip")
-                else: st.warning("No se encontraron archivos válidos.")
+                    st.success(f"✅ {encontrados} archivos DTE procesados correctamente.")
+                    st.download_button("📥 DESCARGAR TODO (.ZIP)", zip_buffer.getvalue(), f"DTE_Busqueda.zip")
+                else: st.warning("No se encontraron archivos válidos en los correos.")
             mail.logout()
         except Exception as e: st.error(f"Error: {e}")
 
