@@ -56,14 +56,14 @@ def obtener_datos_dte(archivo):
     }
     uuid, tipo_nombre = None, "OTROS_DOCUMENTOS"
     try:
-        if archivo is None: return "ERROR", "OTROS"
+        if archivo is None: return None, "OTROS"
         nombre_original = getattr(archivo, 'name', "").upper()
         archivo.seek(0)
         if nombre_original.endswith(".JSON"):
             data = json.load(archivo)
             uuid = data.get("identificacion", {}).get("codigoGeneracion")
             codigo_tipo = data.get("identificacion", {}).get("tipoDte")
-            tipo_nombre = catalogo.get(codigo_tipo, "OTROS_DOCUMENTOS")
+            tipo_nombre = catalogo.get(str(codigo_tipo), "OTROS_DOCUMENTOS")
         else:
             reader = PdfReader(archivo)
             texto = "".join([p.extract_text() or "" for p in reader.pages])
@@ -235,58 +235,37 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail_ids = search_data[0].split()
             if mail_ids:
                 zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
-                uuids_procesados = set()
                 with zipfile.ZipFile(zip_buffer, "w") as zf_final:
                     for idx, m_id in enumerate(mail_ids):
                         res, data = mail.fetch(m_id, "(RFC822)")
                         msg = email.message_from_bytes(data[0][1])
                         for part in msg.walk():
-                            content_type = part.get_content_type()
+                            if part.get_content_maintype() == 'multipart': continue
                             fn = part.get_filename()
-                            if not fn:
-                                if content_type == "application/json": fn = "temp.json"
-                                elif content_type == "application/pdf": fn = "temp.pdf"
-                                elif content_type == "application/zip": fn = "temp.zip"
-                                else: continue
+                            if not fn: continue
                             fn = fn.lower()
                             payload = part.get_payload(decode=True)
                             if not payload: continue
-                            if fn.endswith(".zip"):
-                                try:
-                                    with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
-                                        for z_name in z_in.namelist():
-                                            z_p = z_in.read(z_name)
-                                            u_tmp = None
-                                            if z_name.lower().endswith(".json"):
-                                                try:
-                                                    r_j = json.loads(z_p)
-                                                    u_tmp = r_j.get("identificacion", {}).get("codigoGeneracion")
-                                                except: pass
-                                            elif z_name.lower().endswith(".pdf"):
+
+                            # Caso JSON directo o ZIP
+                            if fn.endswith(".json") or fn.endswith(".pdf") or fn.endswith(".zip"):
+                                if fn.endswith(".zip"):
+                                    try:
+                                        with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
+                                            for z_name in z_in.namelist():
+                                                z_p = z_in.read(z_name)
                                                 u_tmp, _ = obtener_datos_dte(io.BytesIO(z_p))
-                                            if u_tmp:
-                                                u_tmp = str(u_tmp).upper()
-                                                e_z = "json" if z_name.lower().endswith(".json") else "pdf"
-                                                zf_final.writestr(f"{u_tmp}.{e_z}", z_p)
-                                                encontrados += 1
-                                except: pass
-                            if fn.endswith(".json"):
-                                try:
-                                    r_j = json.loads(payload)
-                                    u_tmp = r_j.get("identificacion", {}).get("codigoGeneracion")
-                                    if u_tmp:
-                                        u_tmp = str(u_tmp).upper()
-                                        zf_final.writestr(f"{u_tmp}.json", payload)
-                                        encontrados += 1
-                                except: pass
-                            if fn.endswith(".pdf"):
-                                try:
+                                                if u_tmp:
+                                                    ext = "json" if z_name.lower().endswith(".json") else "pdf"
+                                                    zf_final.writestr(f"{u_tmp}.{ext}", z_p)
+                                                    encontrados += 1
+                                    except: pass
+                                else:
                                     u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
                                     if u_tmp:
-                                        u_tmp = str(u_tmp).upper()
-                                        zf_final.writestr(f"{u_tmp}.pdf", payload)
+                                        ext = "json" if fn.endswith(".json") else "pdf"
+                                        zf_final.writestr(f"{u_tmp}.{ext}", payload)
                                         encontrados += 1
-                                except: pass
                         progreso_mail.progress((idx + 1) / len(mail_ids))
                 if encontrados > 0:
                     st.success(f"✅ {encontrados} archivos DTE procesados.")
