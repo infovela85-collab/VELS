@@ -251,38 +251,50 @@ elif seleccion == "📬 Auto-Descarga JSON":
                             fn = fn.lower()
                             payload = part.get_payload(decode=True)
                             if not payload: continue
-
                             if fn.endswith(".zip"):
                                 try:
                                     with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
                                         for z_name in z_in.namelist():
-                                            z_payload = z_in.read(z_name)
+                                            z_p = z_in.read(z_name)
                                             u_tmp = None
                                             if z_name.lower().endswith(".json"):
                                                 try:
-                                                    raw = json.loads(z_payload)
-                                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
+                                                    r_j = json.loads(z_p)
+                                                    u_tmp = r_j.get("identificacion", {}).get("codigoGeneracion")
                                                 except: pass
                                             elif z_name.lower().endswith(".pdf"):
-                                                u_tmp, _ = obtener_datos_dte(io.BytesIO(z_payload))
-                                            
+                                                u_tmp, _ = obtener_datos_dte(io.BytesIO(z_p))
                                             if u_tmp:
                                                 u_tmp = str(u_tmp).upper()
-                                                ext_zip = "json" if z_name.lower().endswith(".json") else "pdf"
-                                                zf_final.writestr(f"{u_tmp}.{ext_zip}", z_payload)
+                                                e_z = "json" if z_name.lower().endswith(".json") else "pdf"
+                                                zf_final.writestr(f"{u_tmp}.{e_z}", z_p)
                                                 encontrados += 1
                                 except: pass
-                                
                             if fn.endswith(".json"):
                                 try:
-                                    raw = json.loads(payload)
-                                    u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
+                                    r_j = json.loads(payload)
+                                    u_tmp = r_j.get("identificacion", {}).get("codigoGeneracion")
                                     if u_tmp:
                                         u_tmp = str(u_tmp).upper()
                                         zf_final.writestr(f"{u_tmp}.json", payload)
                                         encontrados += 1
                                 except: pass
-                                
                             if fn.endswith(".pdf"):
                                 try:
-                                    u_tmp, _ = obtener_datos
+                                    u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
+                                    if u_tmp:
+                                        u_tmp = str(u_tmp).upper()
+                                        zf_final.writestr(f"{u_tmp}.pdf", payload)
+                                        encontrados += 1
+                                except: pass
+                        progreso_mail.progress((idx + 1) / len(mail_ids))
+                if encontrados > 0:
+                    st.success(f"✅ {encontrados} archivos DTE procesados.")
+                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_Busqueda.zip")
+                else: st.warning("No se encontraron archivos válidos.")
+            mail.logout()
+        except Exception as e: st.error(f"Error: {e}")
+
+elif seleccion == "⚙️ Ajustes":
+    st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
+    st.info("Búsqueda ampliada activa.")
