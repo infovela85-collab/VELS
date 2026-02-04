@@ -232,8 +232,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail.login(email_user, email_pass)
             mail.select("inbox")
             
-            # --- MEJORA DE BÚSQUEDA ---
-            # Busca la palabra clave tanto en el cuerpo como en el asunto para máxima cobertura
             status, search_data = mail.search(None, f'(OR SUBJECT "{buscar_texto}" TEXT "{buscar_texto}" SINCE {imap_date})')
             
             mail_ids = search_data[0].split()
@@ -255,6 +253,8 @@ elif seleccion == "📬 Auto-Descarga JSON":
                             fn = fn.lower()
                             payload = part.get_payload(decode=True)
                             if not payload: continue
+                            
+                            # Cambio clave: Usamos IF independientes para que procese todos los archivos del correo
                             if fn.endswith(".zip"):
                                 try:
                                     with zipfile.ZipFile(io.BytesIO(payload)) as z_in:
@@ -266,17 +266,17 @@ elif seleccion == "📬 Auto-Descarga JSON":
                                                     raw = json.loads(z_payload)
                                                     u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
                                                 except: pass
+                                                if u_tmp:
+                                                    zf_final.writestr(f"{str(u_tmp).upper()}.json", z_payload)
+                                                    encontrados += 1
                                             elif z_name.lower().endswith(".pdf"):
                                                 u_tmp, _ = obtener_datos_dte(io.BytesIO(z_payload))
-                                            if u_tmp:
-                                                u_tmp = str(u_tmp).upper()
-                                                if u_tmp not in uuids_procesados:
-                                                    ext_zip = "json" if z_name.lower().endswith(".json") else "pdf"
-                                                    zf_final.writestr(f"{u_tmp}.{ext_zip}", z_payload)
-                                                    # No agregamos al set aquí para permitir bajar PDF y JSON del mismo UUID
+                                                if u_tmp:
+                                                    zf_final.writestr(f"{str(u_tmp).upper()}.pdf", z_payload)
                                                     encontrados += 1
                                 except: pass
-                            elif fn.endswith(".json"):
+                            
+                            if fn.endswith(".json"):
                                 try:
                                     raw = json.loads(payload)
                                     u_tmp = raw.get("identificacion", {}).get("codigoGeneracion")
@@ -285,7 +285,8 @@ elif seleccion == "📬 Auto-Descarga JSON":
                                         zf_final.writestr(f"{u_tmp}.json", payload)
                                         encontrados += 1
                                 except: pass
-                            elif fn.endswith(".pdf"):
+
+                            if fn.endswith(".pdf"):
                                 try:
                                     u_tmp, _ = obtener_datos_dte(io.BytesIO(payload))
                                     if u_tmp:
