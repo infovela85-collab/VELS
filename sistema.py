@@ -134,4 +134,28 @@ elif seleccion == "📂 Archivador DTE":
     files = st.file_uploader("Cargar archivos", type=["pdf", "json"], accept_multiple_files=True)
     if files:
         if st.button("ORGANIZAR EN CARPETAS"):
-            zip_buffer, procesados, progreso_arc = io.BytesIO(), {}, st.progress
+            zip_buffer, procesados, progreso_arc = io.BytesIO(), {}, st.progress(0)
+            for i, f in enumerate(files):
+                try:
+                    uuid, carpeta = obtener_datos_dte(f)
+                    if not uuid: continue
+                    ext = "PDF" if f.name.lower().endswith(".pdf") else "JSON"
+                    if uuid not in procesados: procesados[uuid] = {"PDF": None, "JSON": None, "CARPETA": carpeta}
+                    f.seek(0)
+                    procesados[uuid][ext] = f.read()
+                except: continue
+                progreso_arc.progress((i + 1) / len(files))
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for uuid, data in procesados.items():
+                    if data["JSON"]:
+                        zf.writestr(f"{data['CARPETA']}/{uuid}.json", data["JSON"])
+                        if data["PDF"]: zf.writestr(f"{data['CARPETA']}/{uuid}.pdf", data["PDF"])
+                    elif data["PDF"]: zf.writestr(f"SOLO_PDF_DTE/{uuid}.pdf", data["PDF"])
+            st.success("✅ Organización finalizada.")
+            st.download_button("📥 DESCARGAR DTE ORGANIZADOS", zip_buffer.getvalue(), "Auditoria_Organizada.zip")
+
+elif seleccion == "📊 Libros de IVA":
+    st.markdown('<h1 class="main-title">Generación de Libros de IVA</h1>', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3)
+    with col1: arc_comp = st.file_uploader("🛒 Compras", type=["json"], accept_multiple_files=True, key="c")
+    with col2: arc_cons = st.file_uploader("👥 Consum
