@@ -232,7 +232,6 @@ elif seleccion == "📬 Auto-Descarga JSON":
             mail.login(email_user, email_pass)
             mail.select("inbox")
             
-            # Buscamos correos desde la fecha
             status, search_data = mail.search(None, f'(OR SUBJECT "{buscar_texto}" TEXT "{buscar_texto}" SINCE {imap_date})')
             
             mail_ids = search_data[0].split()
@@ -247,17 +246,22 @@ elif seleccion == "📬 Auto-Descarga JSON":
                             payload = part.get_payload(decode=True)
                             if not payload: continue
 
-                            # 1. Intentar tratarlo como JSON primero (sin importar extensión)
+                            # MEJORA: Limpieza de JSON para detectar firmas o prefijos
                             try:
-                                raw_json = json.loads(payload.decode('utf-8', errors='ignore'))
+                                content_str = payload.decode('utf-8', errors='ignore').strip()
+                                # Si el contenido no empieza con {, buscamos el primer {
+                                if not content_str.startswith('{'):
+                                    start_idx = content_str.find('{')
+                                    if start_idx != -1: content_str = content_str[start_idx:]
+                                
+                                raw_json = json.loads(content_str)
                                 uuid_j = raw_json.get("identificacion", {}).get("codigoGeneracion")
                                 if uuid_j:
                                     zf_final.writestr(f"{str(uuid_j).upper()}.json", payload)
                                     encontrados += 1
-                                    continue # Ya lo procesamos, saltar al siguiente part
+                                    continue
                             except: pass
 
-                            # 2. Si no es JSON, intentar como PDF
                             try:
                                 uuid_p, _ = obtener_datos_dte(io.BytesIO(payload))
                                 if uuid_p:
