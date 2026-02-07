@@ -150,4 +150,144 @@ elif seleccion == "📂 Archivador DTE":
                     if data["JSON"]:
                         zf.writestr(f"{data['CARPETA']}/{uuid}.json", data["JSON"])
                         if data["PDF"]: zf.writestr(f"{data['CARPETA']}/{uuid}.pdf", data["PDF"])
-                    elif data["PDF"]: zf.writestr(f"SOLO_PDF_DTE/{uuid}.pdf", data
+                    elif data["PDF"]: zf.writestr(f"SOLO_PDF_DTE/{uuid}.pdf", data["PDF"])
+            st.success("✅ Organización finalizada.")
+            st.download_button("📥 DESCARGAR DTE ORGANIZADOS", zip_buffer.getvalue(), "Auditoria_Organizada.zip")
+
+elif seleccion == "📊 Libros de IVA":
+    st.markdown('<h1 class="main-title">Generación de Libros de IVA</h1>', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3)
+    with col1: arc_comp = st.file_uploader("🛒 Compras", type=["json"], accept_multiple_files=True, key="c")
+    with col2: arc_cons = st.file_uploader("👥 Consumidor", type=["json"], accept_multiple_files=True, key="cf")
+    with col3: arc_cont = st.file_uploader("🏢 Contribuyente", type=["json"], accept_multiple_files=True, key="ct")
+    
+    if st.button("GENERAR LIBRO VENTAS"):
+        # Unificamos para procesar lo que se suba
+        archivos = []
+        if arc_cons: archivos.extend(arc_cons)
+        if arc_cont: archivos.extend(arc_cont)
+        
+        if archivos:
+            datos_diarios = {}
+            progreso_iva = st.progress(0)
+            for idx, f in enumerate(archivos):
+                try:
+                    f.seek(0)
+                    data = json.load(f)
+                    ident = data.get("identificacion", {})
+                    res = data.get("resumen", {})
+                    fecha = ident.get("fecEmi")
+                    num_control = str(ident.get("numeroControl", "")).replace("-", "")
+                    uuid_gen = str(ident.get("codigoGeneracion", "")).replace("-", "")
+                    
+                    if fecha:
+                        if fecha not in datos_diarios:
+                            datos_diarios[fecha] = {"Contador": 0, "Nums": [], "UUIDs": [], "Exentas": 0.0, "Gravadas_Lista": []}
+                        
+                        datos_diarios[fecha]["Contador"] += 1
+                        if num_control: datos_diarios[fecha]["Nums"].append(num_control)
+                        if uuid_gen: datos_diarios[fecha]["UUIDs"].append(uuid_gen)
+                        
+                        # CAMBIO QUIRÚRGICO: Tomar del resumen directo
+                        datos_diarios[fecha]["Exentas"] += float(res.get("totalExenta", 0.0))
+                        datos_diarios[fecha]["Gravadas_Lista"].append(str(res.get("totalGravada", 0.0)))
+                except: continue
+                progreso_iva.progress((idx + 1) / len(archivos))
+            
+            registros = []
+            for fecha in sorted(datos_diarios.keys()):
+                d = datos_diarios[fecha]
+                d["Nums"].sort()
+                d["UUIDs"].sort()
+                
+                # CAMBIO QUIRÚRGICO: Fecha Formato El Salvador
+                try:
+                    dt_obj = datetime.strptime(fecha, "%Y-%m-%d")
+                    fecha_sv = dt_obj.strftime("%d/%m/%Y")
+                except:
+                    fecha_sv = fecha
+
+                registros.append({
+                    "Fecha": fecha_sv,
+                    "Del DTE": d["Nums"][0] if d["Nums"] else "N/A",
+                    "Al DTE": d["Nums"][-1] if d["Nums"] else "N/A",
+                    "Del Cod Gen.": d["UUIDs"][0] if d["UUIDs"] else "N/A",
+                    "Al Cod Gen.": d["UUIDs"][-1] if d["UUIDs"] else "N/A",
+                    "Cantidad DTE": d["Contador"],
+                    "Total Exentas": d["Exentas"],
+                    "Total Gravadas": "=" + "+".join(d["Gravadas_Lista"]) if d["Gravadas_Lista"] else "0.0"
+                })
+            
+            if registros:
+                df = pd.DataFrame(registros)
+                st.dataframe(df)
+                out = io.BytesIO()
+                with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, index=False)
+                st.download_button("📥 DESCARGAR EXCEL", out.getvalue(), "Libro_IVA_Aglomerado.xlsx")
+
+elif seleccion == "📬 Auto-Descarga JSON":
+    st.markdown('<h1 class="main-title">Descarga Inteligente DTE</h1>', unsafe_allow_html=True)
+    with st.form("vels_form_mail", clear_on_submit=False):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("""<input type="text" style="display:none"><input type="password" style="display:none">""", unsafe_allow_html=True)
+            email_user = st.text_input("Tu Correo", value=st.session_state.email_pref) 
+            email_pass = st.text_input("Contraseña de Aplicación", value=st.session_state.pass_pref, type="password")
+            recordar = st.checkbox("Recordar en este navegador", value=True)
+            server_choice = st.selectbox("Servidor", ["imap.gmail.com", "outlook.office365.com"])
+        with col_b:
+            buscar_texto = st.text_input("Correo Remitente", value="")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1: fecha_desde = st.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY")
+            with col_f2: fecha_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY")
+        submit_button = st.form_submit_button("PROCESAR DTE")
+    if submit_button:
+        st.session_state.email_pref, st.session_state.pass_pref = email_user, email_pass
+        if recordar: guardar_local(email_user, email_pass)
+        try:
+            imap_date = fecha_desde.strftime("%d-%b-%Y")
+            mail = imaplib.IMAP4_SSL(server_choice)
+            mail.login(email_user, email_pass)
+            mail.select("inbox")
+            status, search_data = mail.search(None, f'(OR SUBJECT "{buscar_texto}" TEXT "{buscar_texto}" SINCE {imap_date})')
+            mail_ids = search_data[0].split()
+            if mail_ids:
+                zip_buffer, encontrados, progreso_mail = io.BytesIO(), 0, st.progress(0)
+                with zipfile.ZipFile(zip_buffer, "w") as zf_final:
+                    for idx, m_id in enumerate(mail_ids):
+                        res_m, data_m = mail.fetch(m_id, "(RFC822)")
+                        msg = email.message_from_bytes(data_m[0][1])
+                        for part in msg.walk():
+                            if part.get_content_maintype() == 'multipart': continue
+                            payload = part.get_payload(decode=True)
+                            if not payload: continue
+                            try:
+                                content_str = payload.decode('utf-8', errors='ignore').strip()
+                                if not content_str.startswith('{'):
+                                    start_idx = content_str.find('{')
+                                    if start_idx != -1: content_str = content_str[start_idx:]
+                                raw_json = json.loads(content_str)
+                                uuid_j = raw_json.get("identificacion", {}).get("codigoGeneracion")
+                                if uuid_j:
+                                    zf_final.writestr(f"{str(uuid_j).upper()}.json", payload)
+                                    encontrados += 1
+                                    continue
+                            except: pass
+                            try:
+                                uuid_p, _ = obtener_datos_dte(io.BytesIO(payload))
+                                if uuid_p:
+                                    zf_final.writestr(f"{str(uuid_p).upper()}.pdf", payload)
+                                    encontrados += 1
+                            except: pass
+                        progreso_mail.progress((idx + 1) / len(mail_ids))
+                if encontrados > 0:
+                    st.success(f"✅ {encontrados} archivos DTE procesados.")
+                    st.download_button("📥 DESCARGAR ZIP", zip_buffer.getvalue(), f"DTE_Busqueda.zip")
+                else: st.warning("No se encontraron archivos válidos.")
+            mail.logout()
+        except Exception as e: st.error(f"Error: {e}")
+
+elif seleccion == "⚙️ Ajustes":
+    st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
+    st.info("Búsqueda ampliada activa.")
