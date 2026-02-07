@@ -181,8 +181,8 @@ elif seleccion == "📊 Libros de IVA":
                         if num_control: datos_diarios[fecha]["Nums"].append(num_control)
                         if uuid_gen: datos_diarios[fecha]["UUIDs"].append(uuid_gen)
                         datos_diarios[fecha]["Exentas"] += float(res.get("totalExenta", 0.0))
-                        for item in cuerpo:
-                            datos_diarios[fecha]["Gravadas_Lista"].append(str(item.get("ventaGravada", 0.0)))
+                        datos_diarios[fecha]["Exentas"] += float(res.get("totalExenta", 0.0))
+                        datos_diarios[fecha]["Gravadas_Lista"].append(str(res.get("totalGravada", 0.0))
                 except: continue
                 progreso_iva.progress((idx + 1) / len(arc_cons))
             registros = []
