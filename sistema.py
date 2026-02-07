@@ -224,10 +224,10 @@ elif seleccion == "📊 Libros de IVA":
                 out = io.BytesIO()
                 with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False)
-                st.download_button("📥 DESCARGAR EXCEL", out.getvalue(), "Libro_IVA_Aglomerado.xlsx")
+                st.download_button("📥 DESCARGAR EXCEL", out.getvalue(), "Libro_IVA.xlsx")
 
 elif seleccion == "📬 Auto-Descarga JSON":
-    st.markdown('<h1 class="main-title">Descarga Inteligente DTE</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-title">Descarga Automatica DTE</h1>', unsafe_allow_html=True)
     with st.form("vels_form_mail", clear_on_submit=False):
         col_a, col_b = st.columns(2)
         with col_a:
@@ -291,3 +291,4 @@ elif seleccion == "📬 Auto-Descarga JSON":
 elif seleccion == "⚙️ Ajustes":
     st.markdown('<h1 class="main-title">Ajustes</h1>', unsafe_allow_html=True)
     st.info("Búsqueda ampliada activa.")
+
