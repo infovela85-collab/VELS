@@ -140,4 +140,14 @@ elif seleccion == "📂 Archivador DTE":
                     uuid, carpeta = obtener_datos_dte(f)
                     if not uuid: continue
                     ext = "PDF" if f.name.lower().endswith(".pdf") else "JSON"
-                    if
+                    if uuid not in procesados: procesados[uuid] = {"PDF": None, "JSON": None, "CARPETA": carpeta}
+                    f.seek(0)
+                    procesados[uuid][ext] = f.read()
+                except: continue
+                progreso_arc.progress((i + 1) / len(files))
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for uuid, data in procesados.items():
+                    if data["JSON"]:
+                        zf.writestr(f"{data['CARPETA']}/{uuid}.json", data["JSON"])
+                        if data["PDF"]: zf.writestr(f"{data['CARPETA']}/{uuid}.pdf", data["PDF"])
+                    elif data["PDF"]: zf.writestr(f"SOLO_PDF_DTE/{uuid}.pdf", data
